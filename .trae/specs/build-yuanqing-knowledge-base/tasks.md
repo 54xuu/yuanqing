@@ -32,10 +32,10 @@
   - [x] SubTask 6.2: 为 MCP 工具调用编写测试（search_notes、get_note 返回结构正确）
   - [x] SubTask 6.3: 运行 `npm test` 全部通过
 
-- [ ] Task 7: 端到端验证与清理
-  - [ ] SubTask 7.1: 启动应用，用 agent-browser 截图验证文件夹/笔记显示与 CRUD 流程
-  - [ ] SubTask 7.2: 清理测试代码与临时产物，保留示例数据
-  - [ ] SubTask 7.3: 完善并提交 README.md 与代码
+- [x] Task 7: 端到端验证与清理
+  - [x] SubTask 7.1: 启动应用，用 agent-browser 截图验证文件夹/笔记显示与 CRUD 流程
+  - [x] SubTask 7.2: 清理测试代码与临时产物，保留示例数据
+  - [x] SubTask 7.3: 完善并提交 README.md 与代码
 
 # Task Dependencies
 - Task 2 依赖 Task 1
