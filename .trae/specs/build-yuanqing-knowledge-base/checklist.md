@@ -1,0 +1,10 @@
+- [x] `npm run build` 编译无错误
+- [x] `npm test` 单元测试全部通过
+- [x] DAO 层覆盖笔记 CRUD 与 FTS5 检索
+- [x] MCP Server 暴露 `search_notes` 与 `get_note` 工具且返回结构正确
+- [x] 前端三栏界面能正常显示文件夹树与笔记列表
+- [x] 通过 agent-browser 截图验证可新建、编辑、删除笔记
+- [x] 首次启动自动写入「自我介绍」「产品介绍」示例笔记
+- [x] MCP Server 可被外部 MCP 客户端连接并成功调用
+- [x] README.md 说明项目定位、技术栈、启动方式、MCP 接入示例
+- [x] 测试代码与临时产物已清理，代码已提交
