@@ -1,13 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import FolderTree from "./components/FolderTree";
 import NoteList from "./components/NoteList";
 import NoteEditor from "./components/NoteEditor";
 import type { Folder } from "./components/FolderTree";
 import type { Note, NoteSummary } from "./components/NoteList";
 
+type CurrentUser = {
+  id: string;
+  username: string;
+  role: "admin" | "user";
+};
+
 export default function Home() {
+  const router = useRouter();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<
@@ -24,11 +32,38 @@ export default function Home() {
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [foldersError, setFoldersError] = useState<string | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => {
+        if (!res.ok) {
+          router.replace("/login?next=/");
+          return null;
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (data?.user) setCurrentUser(data.user);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, [router]);
+
+  const logout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+  }, [router]);
 
   const refreshFolders = useCallback(async () => {
     try {
       setFoldersError(null);
       const res = await fetch("/api/folders");
+      if (res.status === 401) {
+        router.replace("/login?next=/");
+        return;
+      }
       if (!res.ok) throw new Error("failed to load folders");
       const data = await res.json();
       setFolders(data.folders ?? []);
@@ -38,7 +73,7 @@ export default function Home() {
     } finally {
       setLoadingFolders(false);
     }
-  }, []);
+  }, [router]);
 
   const refreshNotes = useCallback(async () => {
     try {
@@ -210,24 +245,31 @@ export default function Home() {
     <div className="app">
       <header className="app-header">
         <div className="app-title">源清 YuanQing</div>
-        <div className="search-box">
-          <input
-            type="text"
-            className="search-input"
-            placeholder="搜索笔记..."
-            value={searchInput}
-            onChange={(e) => {
-              setSearchInput(e.target.value);
-              if (e.target.value === "") {
-                clearSearch();
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleSearchSubmit();
-            }}
-          />
-          <button className="small-btn" onClick={handleSearchSubmit}>
-            搜索
+        <div className="app-header-right">
+          <div className="search-box">
+            <input
+              type="text"
+              className="search-input"
+              placeholder="搜索笔记..."
+              value={searchInput}
+              onChange={(e) => {
+                setSearchInput(e.target.value);
+                if (e.target.value === "") {
+                  clearSearch();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSearchSubmit();
+              }}
+            />
+            <button className="small-btn" onClick={handleSearchSubmit}>
+              搜索
+            </button>
+          </div>
+          {currentUser && <span>{currentUser.username}</span>}
+          <a href="/admin">后台</a>
+          <button className="link-btn" onClick={logout}>
+            退出
           </button>
         </div>
       </header>
