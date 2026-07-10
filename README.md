@@ -18,7 +18,7 @@
 
 - 用 **SQLite + FTS5** 提供毫秒级全文检索
 - 用 **Folder / Note** 结构化组织个人上下文
-- 暴露 MCP 工具 `search_notes(query)` 与 `get_note(id)`，Agent 主动按需拉取
+- 暴露 MCP 工具 `search_notes(query)`、`get_note(id)` 与 `upsert_note(path, content)`，Agent 可按需检索、读取，也可直接写回笔记
 
 ## 使用场景（路演闭环）
 
@@ -60,7 +60,8 @@
 ├── tests/
 │   ├── setup.ts                      # 测试用临时 DB
 │   ├── db.test.ts                    # DAO 单元测试
-│   └── mcp.test.ts                   # MCP 工具返回结构测试
+│   ├── mcp.test.ts                   # MCP 工具返回结构测试
+│   └── mcp-client.ts                 # 端到端 MCP 客户端测试（拉起 server，走协议验证所有工具）
 ├── next.config.mjs
 ├── tsconfig.json
 ├── vitest.config.ts
@@ -139,10 +140,22 @@ npm run mcp        # 等价于 tsx mcp-server/index.ts，以 stdio 方式运行
 | --- | --- | --- |
 | `search_notes` | `query: string`（关键词） | `{ count, results: [{ id, title, summary }] }` |
 | `get_note` | `id: string`（笔记 uuid） | `{ note: { id, folder_id, title, content, created_at, updated_at } }`；未找到时返回 `{ error, id }` |
+| `upsert_note` | `path: string`（如 `目录A/笔记B`，最后一段为笔记标题，前面段为文件夹层级，不存在则自动创建）、`content: string`（新完整 Markdown 内容） | `{ action: "created" \| "updated", note }`；路径非法时返回 `{ error, path }`。同名同目录笔记存在则覆盖内容，不存在则新增 |
 
-### 客户端配置示例（Claude Desktop）
+> `upsert_note` 是写操作：Agent 不仅能检索/读取你的知识，还能在对话中把新产生的结论、会议纪要、待办等直接写回知识库（按 `目录/笔记` 路径自动建文件夹与笔记）。
 
-在 `claude_desktop_config.json` 中添加：
+### 两种传输模式
+
+源清同时提供两种 MCP 传输方式，对应不同的部署/使用场景：
+
+| 模式 | 启动方式 | 鉴权 | 适用场景 |
+| --- | --- | --- | --- |
+| **stdio** | `npm run mcp` | 无 | Agent 与源清运行在**同一台机器**（如本地 Claude Desktop / 本地 IDE） |
+| **HTTP (Streamable HTTP)** | `npm run start` 后访问 `/api/mcp` | API Key（`x-api-key` 或 `Authorization: Bearer`） | 源清部署在**服务器**，远程 Agent（如 Trae Work / 云端 Agent）通过网络访问 |
+
+### 客户端配置示例（stdio，本地）
+
+适用于 Claude Desktop、Trae IDE 等本地客户端，在配置文件中加入：
 
 ```json
 {
@@ -156,7 +169,94 @@ npm run mcp        # 等价于 tsx mcp-server/index.ts，以 stdio 方式运行
 }
 ```
 
-配置完成后，在对话中提问，Agent 会自动调用 `search_notes` 获取候选笔记摘要，再调用 `get_note` 读取完整 Markdown，从而在对话中引用你的知识。
+配置完成后，在对话中提问，Agent 会自动调用 `search_notes` 获取候选笔记摘要，再调用 `get_note` 读取完整 Markdown，从而在对话中引用你的知识；需要记录新内容时调用 `upsert_note` 写回。
+
+## 部署到服务器后的 Agent 配置
+
+当代码部署到服务器后，远程 Agent（如 **Trae Work**、云端 Agent、团队共享的 IDE）无法通过 stdio 拉起本地进程，需要走 **HTTP 传输**：Agent 通过 `https://<你的域名>/api/mcp` 访问源清，并用 **API Key** 鉴权。完整流程如下。
+
+### 1. 部署服务
+
+在服务器上构建并启动生产服务（假设域名 `yuanqing.example.com`，已用反向代理终止 TLS 并转发到 3000 端口）：
+
+```bash
+# 安装依赖并构建
+npm ci
+npm run build
+
+# 启动生产服务（默认监听 3000）
+# 生产环境务必显式设置会话密钥与数据库路径
+YUANQING_SESSION_SECRET=<一段随机长字符串> \
+YUANQING_DB_PATH=/data/yuanqing.db \
+npm run start
+```
+
+需要的环境变量：
+
+| 变量 | 作用 | 是否必填 |
+| --- | --- | --- |
+| `YUANQING_SESSION_SECRET` | 登录会话 Cookie 的 HMAC 签名密钥；不设则进程级随机（重启失效，**生产必须显式设置**） | 生产必填 |
+| `YUANQING_DB_PATH` | SQLite 文件位置；默认 `./yuanqing.db` | 推荐 |
+| `PORT` | 监听端口；默认 3000 | 可选 |
+
+服务起来后，首次访问会自动建表并写入示例数据与管理员账号 `admin` / `Admin@123`（**上线后请立刻在后台修改密码**）。
+
+### 2. 生成 API Key
+
+Agent 调用 `/api/mcp` 需要一个有效的 API Key。两种获取方式：
+
+- **后台界面**：浏览器访问 `https://yuanqing.example.com/login`，用 `admin` / `Admin@123` 登录 → 进入 `/admin` → 「我的 API 密钥」→「创建密钥」→ 复制形如 `yq_xxxxxxxx...` 的完整 Key。
+- **REST API**（适合自动化）：
+  ```bash
+  # 1) 登录拿到会话 Cookie
+  curl -c cookies.txt -X POST https://yuanqing.example.com/api/auth/login \
+    -H 'content-type: application/json' \
+    -d '{"username":"admin","password":"Admin@123"}'
+
+  # 2) 创建一个 API Key（返回完整 key，仅此一次可见）
+  curl -b cookies.txt -X POST https://yuanqing.example.com/api/api-keys \
+    -H 'content-type: application/json' \
+    -d '{"name":"trae-work"}'
+  ```
+
+### 3. 配置 Trae Work / 远程 Agent（HTTP 模式）
+
+拿到 API Key 后，在 Agent 的 MCP 配置中添加一个 **Streamable HTTP** 类型的 server，把 Key 放进请求头。Trae Work / Trae IDE 的 MCP 配置（`mcp.json` 或设置面板的「MCP」入口）示例如下：
+
+```json
+{
+  "mcpServers": {
+    "yuanqing": {
+      "url": "https://yuanqing.example.com/api/mcp",
+      "type": "http",
+      "headers": {
+        "x-api-key": "yq_你的APIKey"
+      }
+    }
+  }
+}
+```
+
+> 部分客户端（如 Claude Desktop 远程、旧版 Trae）字段名可能是 `transport`、`serverUrl` 或 `command: "http"`，但核心都是：**URL 指向 `/api/mcp`，请求头带 `x-api-key`**。若客户端不支持自定义请求头，可改用 `Authorization: Bearer yq_你的APIKey`，源清两种方式都接受。
+
+配置完成后，在 Trae Work 的对话中即可让 Agent：
+- `search_notes` 检索知识库
+- `get_note` 读取某条笔记全文
+- `upsert_note` 把对话中产生的新结论/纪要按 `目录/笔记` 路径写回知识库
+
+### 4. 同机部署也可用 stdio（可选）
+
+如果 Agent 与源清在同一台服务器（例如服务器上同时跑 Trae IDE），也可以不经过 HTTP、直接用 stdio，配置同上文「客户端配置示例（stdio，本地）」，把路径换成服务器上的绝对路径即可。stdio 模式不需要 API Key。
+
+### 5. 端到端验证（MCP 客户端测试）
+
+项目自带一个端到端 MCP 客户端测试脚本，会真的拉起 `mcp-server/index.ts` 并通过 MCP 协议逐一验证 3 个工具（`search_notes` / `get_note` / `upsert_note`，含创建、更新、嵌套路径、错误分支）：
+
+```bash
+npm run test:mcp-client      # 等价于 tsx tests/mcp-client.ts
+```
+
+脚本使用独立的临时数据库，不会污染线上的 `yuanqing.db`。要验证部署后的 HTTP 端点，可参考 [mcp-client.ts](file:///workspace/tests/mcp-client.ts) 中的客户端用法，把 `StdioClientTransport` 换成 `StreamableHTTPClientTransport(new URL('https://yuanqing.example.com/api/mcp'), { requestInit: { headers: { 'x-api-key': 'yq_...' } } })` 即可。
 
 ## REST API
 
@@ -178,7 +278,8 @@ npm run mcp        # 等价于 tsx mcp-server/index.ts，以 stdio 方式运行
 ## 测试
 
 ```bash
-npm test           # 运行 Vitest 单元测试（DAO + MCP 工具）
+npm test                  # 运行 Vitest 单元测试（DAO + MCP 工具 handler）
+npm run test:mcp-client   # 端到端：拉起 MCP server，用 MCP 客户端走协议验证所有工具
 ```
 
 ## 脚本一览
@@ -190,6 +291,7 @@ npm test           # 运行 Vitest 单元测试（DAO + MCP 工具）
 | `npm run start` | 启动生产服务器 |
 | `npm run mcp` | 启动 MCP Server（stdio） |
 | `npm test` | 运行单元测试 |
+| `npm run test:mcp-client` | 端到端 MCP 客户端测试 |
 | `npm run lint` | 运行 lint |
 
 ## License
