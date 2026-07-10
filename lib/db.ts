@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
+import { hashPassword } from './password';
 
 export interface Folder {
   id: string;
@@ -21,6 +22,28 @@ export interface NoteSummary {
   id: string;
   title: string;
   summary: string;
+}
+
+export type UserRole = 'admin' | 'user';
+
+export interface User {
+  id: string;
+  username: string;
+  password_hash: string;
+  role: UserRole;
+  created_at: string;
+}
+
+export interface ApiKey {
+  id: string;
+  user_id: string;
+  key: string;
+  name: string;
+  created_at: string;
+}
+
+export interface ApiKeyWithUsername extends ApiKey {
+  username: string;
 }
 
 type DB = Database.Database;
@@ -59,6 +82,26 @@ function initSchema(db: DB): void {
       content,
       tokenize = 'unicode61'
     );
+
+    CREATE TABLE IF NOT EXISTS User (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ApiKey (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_apikey_user ON ApiKey(user_id);
+    CREATE INDEX IF NOT EXISTS idx_apikey_key ON ApiKey(key);
   `);
 }
 
@@ -136,11 +179,24 @@ function seedIfEmpty(db: DB): void {
   ).run(productId, '产品介绍', PRODUCT_NOTE_CONTENT);
 }
 
+function seedAdmin(db: DB): void {
+  const row = db
+    .prepare("SELECT COUNT(*) AS cnt FROM User WHERE role = 'admin'")
+    .get() as { cnt: number };
+  if (row.cnt > 0) return;
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO User (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, 'admin', hashPassword('Admin@123'), 'admin', now);
+}
+
 export function getDb(): DB {
   if (dbInstance) return dbInstance;
   const db = new Database(DB_PATH);
   initSchema(db);
   seedIfEmpty(db);
+  seedAdmin(db);
   dbInstance = db;
   return db;
 }
@@ -283,4 +339,111 @@ export function searchNotes(query: string): NoteSummary[] {
        LIMIT 20`
     )
     .all(ftsQuery) as NoteSummary[];
+}
+
+// ---------- Users ----------
+
+function generateApiKeyString(): string {
+  return 'yq_' + uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '').slice(0, 8);
+}
+
+export function listUsers(): User[] {
+  const db = getDb();
+  return db
+    .prepare('SELECT * FROM User ORDER BY created_at ASC')
+    .all() as User[];
+}
+
+export function getUserById(id: string): User | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM User WHERE id = ?').get(id) as User | undefined;
+  return row ?? null;
+}
+
+export function getUserByUsername(username: string): User | null {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM User WHERE username = ?')
+    .get(username) as User | undefined;
+  return row ?? null;
+}
+
+export function createUser(
+  username: string,
+  password: string,
+  role: UserRole = 'user'
+): User {
+  const db = getDb();
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO User (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, username, hashPassword(password), role, now);
+  return { id, username, password_hash: '', role, created_at: now };
+}
+
+export function deleteUser(id: string): boolean {
+  const db = getDb();
+  // SQLite needs PRAGMA foreign_keys=ON to cascade; do explicit cleanup to be safe.
+  db.prepare('DELETE FROM ApiKey WHERE user_id = ?').run(id);
+  const result = db.prepare('DELETE FROM User WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// ---------- API Keys ----------
+
+export function createApiKey(
+  userId: string,
+  name: string = ''
+): ApiKey {
+  const db = getDb();
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const key = generateApiKeyString();
+  db.prepare(
+    'INSERT INTO ApiKey (id, user_id, key, name, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, userId, key, name, now);
+  return { id, user_id: userId, key, name, created_at: now };
+}
+
+export function listApiKeysByUser(userId: string): ApiKey[] {
+  const db = getDb();
+  return db
+    .prepare('SELECT * FROM ApiKey WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId) as ApiKey[];
+}
+
+export function listAllApiKeys(): ApiKeyWithUsername[] {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT ApiKey.*, User.username AS username
+       FROM ApiKey JOIN User ON ApiKey.user_id = User.id
+       ORDER BY ApiKey.created_at DESC`
+    )
+    .all() as ApiKeyWithUsername[];
+}
+
+export function getApiKeyByKey(key: string): ApiKey | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM ApiKey WHERE key = ?').get(key) as ApiKey | undefined;
+  return row ?? null;
+}
+
+export function getApiKeyById(id: string): ApiKey | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM ApiKey WHERE id = ?').get(id) as ApiKey | undefined;
+  return row ?? null;
+}
+
+export function deleteApiKey(id: string): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM ApiKey WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+export function deleteApiKeysByUser(userId: string): number {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM ApiKey WHERE user_id = ?').run(userId);
+  return result.changes;
 }
