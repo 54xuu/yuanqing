@@ -224,6 +224,17 @@ export function getFolder(id: string): Folder | null {
   return row ?? null;
 }
 
+export function getFolderByParentAndName(
+  parent_id: string | null,
+  name: string
+): Folder | null {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM Folder WHERE parent_id IS ? AND name = ?')
+    .get(parent_id, name) as Folder | undefined;
+  return row ?? null;
+}
+
 export function updateFolder(id: string, name: string): Folder | null {
   const db = getDb();
   const result = db.prepare('UPDATE Folder SET name = ? WHERE id = ?').run(name, id);
@@ -276,6 +287,17 @@ export function createNote(input: {
 export function getNote(id: string): Note | null {
   const db = getDb();
   const row = db.prepare('SELECT * FROM Note WHERE id = ?').get(id) as Note | undefined;
+  return row ?? null;
+}
+
+export function getNoteByFolderAndTitle(
+  folder_id: string | null,
+  title: string
+): Note | null {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM Note WHERE folder_id IS ? AND title = ?')
+    .get(folder_id, title) as Note | undefined;
   return row ?? null;
 }
 

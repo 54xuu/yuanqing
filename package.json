@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "mcp": "tsx mcp-server/index.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:mcp-client": "tsx tests/mcp-client.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
