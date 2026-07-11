@@ -19,7 +19,7 @@ function unauthorized(): Response {
   return new Response(
     JSON.stringify({
       jsonrpc: '2.0',
-      error: { code: -32001, message: 'unauthorized: missing or invalid api key' },
+      error: { code: -32001, message: '未授权：API密钥缺失或无效' },
       id: null,
     }),
     { status: 401, headers: { 'content-type': 'application/json' } }

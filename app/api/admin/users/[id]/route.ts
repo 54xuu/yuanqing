@@ -15,12 +15,12 @@ export async function DELETE(
 
   // Prevent an admin from deleting themselves.
   if (id === auth.user.id) {
-    return Response.json({ error: 'cannot delete yourself' }, { status: 400 });
+    return Response.json({ error: '不能删除当前登录用户' }, { status: 400 });
   }
 
   const ok = deleteUser(id);
   if (!ok) {
-    return Response.json({ error: 'user not found' }, { status: 404 });
+    return Response.json({ error: '用户不存在' }, { status: 404 });
   }
   return Response.json({ ok: true }, { status: 200 });
 }

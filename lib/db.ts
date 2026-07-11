@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { hashPassword } from './password';
+import { randomBytes } from 'node:crypto';
 
 export interface Folder {
   id: string;
@@ -186,9 +187,22 @@ function seedAdmin(db: DB): void {
   if (row.cnt > 0) return;
   const id = uuidv4();
   const now = new Date().toISOString();
+  const password = process.env.YUANQING_ADMIN_PASSWORD;
+  if (!password || password.length < 8) {
+    // SECURITY: no hardcoded default. Generate a random password and print it once.
+    const generated = randomBytes(12).toString('base64url');
+    console.warn('[security] No YUANQING_ADMIN_PASSWORD set (or < 8 chars).');
+    console.warn('[security] Generated random admin password (save it now):');
+    console.warn('[security]   username: admin');
+    console.warn('[security]   password: ' + generated);
+    db.prepare(
+      'INSERT INTO User (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, 'admin', hashPassword(generated), 'admin', now);
+    return;
+  }
   db.prepare(
     'INSERT INTO User (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, 'admin', hashPassword('Admin@123'), 'admin', now);
+  ).run(id, 'admin', hashPassword(password), 'admin', now);
 }
 
 export function getDb(): DB {

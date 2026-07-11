@@ -32,11 +32,11 @@ export type AuthResult =
   | { ok: false; response: Response };
 
 function unauthorized(): Response {
-  return Response.json({ error: 'unauthorized' }, { status: 401 });
+  return Response.json({ error: '未登录或登录已过期' }, { status: 401 });
 }
 
 function forbidden(): Response {
-  return Response.json({ error: 'forbidden' }, { status: 403 });
+  return Response.json({ error: '权限不足' }, { status: 403 });
 }
 
 /** Require an authenticated user. Returns 401 response if not logged in. */

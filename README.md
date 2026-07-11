@@ -97,15 +97,54 @@ Note_fts (FTS5 虚拟表)
 
 ### 环境要求
 
-- Node.js 18+（推荐 20+）
+- Node.js 18+（推荐 20+，开发用 22 LTS 已验证）
 - npm
+
+### 开发环境准备（WSL Ubuntu 用户必读）
+
+如果你的项目放在 WSL 文件系统里（例如 `~/devbox/yuanqing`），**必须在 WSL 里安装 Linux 版 Node.js**，不能直接用 Windows 的 Node。否则 `npm run dev` 会报：
+
+```
+'\\wsl.localhost\Ubuntu-22.04\home\xujian\devbox\yuanqing'
+用作为当前目录的以上路径启动了 CMD.EXE。
+UNC 路径不受支持。默认值设为 Windows 目录。
+Error: > Couldn't find any `pages` or `app` directory.
+```
+
+原因是 Windows 版 node.exe 不支持 UNC 路径作为当前目录，会自动回退到 `C:\Windows`，导致找不到 `app/` 目录。
+
+**正确做法（在 WSL 里执行）**：
+
+```bash
+# 1. 安装 Node.js 22 LTS（NodeSource 仓库）
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 2. 验证（应显示 v22.x 和 10.x）
+node --version
+npm --version
+
+# 3. 确认用的是 Linux 版而非 Windows 版
+which node   # 应为 /usr/bin/node，而不是 /mnt/d/... 或 /mnt/c/...
+which npm    # 应为 /usr/bin/npm，而不是 /mnt/d/... 或 /mnt/c/...
+```
+
+> 如果你之前装过 nvm，也可以用 `nvm install 22 && nvm use 22` 替代上面的 NodeSource 方式。
 
 ### 安装与开发
 
 ```bash
-npm install        # 安装依赖
-npm run dev        # 启动开发服务器，访问 http://localhost:3000
+# 在 WSL 里执行
+cd ~/devbox/yuanqing
+npm install        # 首次需要安装依赖
+npm run dev        # 启动开发服务器
 ```
+
+### 访问开发服务器
+
+**WSL 里启动后，在 Windows 浏览器直接访问** `http://localhost:3000` 即可——WSL2 会自动把 localhost 端口转发到 Windows 主机，无需额外配置。
+
+> 如果在 Windows PowerShell 里访问 WSL 项目（不推荐），需要先用 `subst Y: \\wsl.localhost\Ubuntu-22.04\home\xujian\devbox\yuanqing` 映射盘符，再 `cd Y:\ && node node_modules\next\dist\bin\next dev`。但这种方式会遇到 better-sqlite3 junction point 创建失败的问题（Turbopack 限制），建议优先用 WSL 原生 Node。
 
 首次启动会在项目根目录生成 `yuanqing.db`（已被 `.gitignore` 忽略）并写入示例数据。
 

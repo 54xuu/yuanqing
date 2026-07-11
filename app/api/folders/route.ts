@@ -7,7 +7,7 @@ export async function GET() {
     const folders: Folder[] = listFolders();
     return Response.json({ folders }, { status: 200 });
   } catch (err) {
-    return Response.json({ error: 'internal server error' }, { status: 500 });
+    return Response.json({ error: '服务器内部错误' }, { status: 500 });
   }
 }
 
@@ -17,12 +17,12 @@ export async function POST(request: Request) {
     try {
       body = await request.json();
     } catch {
-      return Response.json({ error: 'invalid JSON body' }, { status: 400 });
+      return Response.json({ error: '请求体格式无效' }, { status: 400 });
     }
 
     const name = typeof body?.name === 'string' ? body.name : '';
     if (!name) {
-      return Response.json({ error: 'name is required' }, { status: 400 });
+      return Response.json({ error: '名称为必填项' }, { status: 400 });
     }
 
     const parent_id =
@@ -31,6 +31,6 @@ export async function POST(request: Request) {
     const folder = createFolder(name, parent_id ?? null);
     return Response.json(folder, { status: 201 });
   } catch (err) {
-    return Response.json({ error: 'internal server error' }, { status: 500 });
+    return Response.json({ error: '服务器内部错误' }, { status: 500 });
   }
 }

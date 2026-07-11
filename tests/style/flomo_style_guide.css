@@ -1,0 +1,38 @@
+/* flomo (Light Mode) Design System Style Guide */
+
+:root {
+  /* 1. Color Palette */
+  --flomo-primary: #00B96B;         /* Characteristic flomo Green - Main brand color, active states, tags, highlight buttons */
+  --flomo-primary-hover: #009e5b;   /* Slightly darker green for hovers */
+  --flomo-bg-main: #F7F7F7;         /* Soft light gray background for the main viewport */
+  --flomo-bg-card: #FFFFFF;         /* Pure white background for content blocks (cards, inputs, sidebars) */
+  --flomo-border: #EFEFEF;          /* Subtle gray borders separating panels and cards */
+  
+  /* Text Colors */
+  --flomo-text-main: #333333;       /* High-contrast dark gray for primary body text */
+  --flomo-text-muted: #888888;      /* Muted gray for timestamps, secondary labels, counts, and placeholders */
+  --flomo-text-placeholder: #CCCCCC;/* Light gray for placeholder text */
+  --flomo-text-on-primary: #FFFFFF; /* White text for green buttons/highlights */
+
+  /* Heatmap (Contribution Grid) Palette */
+  --flomo-heatmap-0: #F3F3F3;       /* Level 0: Empty/No records */
+  --flomo-heatmap-1: #D2F2E4;       /* Level 1: Light green */
+  --flomo-heatmap-2: #A3E5C9;       /* Level 2: Medium-light green */
+  --flomo-heatmap-3: #56D49D;       /* Level 3: Medium-dark green */
+  --flomo-heatmap-4: #00B96B;       /* Level 4: Active primary green */
+
+  /* 2. Typography */
+  --flomo-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --flomo-font-size-base: 14px;     /* Standard content & note font size */
+  --flomo-font-size-sm: 12px;       /* Secondary details, meta info, tags */
+  --flomo-font-size-lg: 16px;       /* Main title, input fields, active headers */
+  --flomo-line-height-content: 1.6; /* Comfortable line height for long-form note reading */
+
+  /* 3. Spacing & Radius */
+  --flomo-radius-sm: 4px;           /* Small icons, tag boxes, heat map cells */
+  --flomo-radius-md: 8px;           /* Cards, input blocks, popup overlays */
+  --flomo-radius-lg: 12px;          /* Main panel layouts */
+  
+  --flomo-padding-card: 16px;       /* Consistent standard card padding */
+  --flomo-padding-sm: 8px;          /* Inner margins, compact menu items */
+}

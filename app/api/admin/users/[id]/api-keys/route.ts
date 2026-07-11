@@ -25,7 +25,7 @@ export async function POST(
 
   const { id } = await params;
   if (!getUserById(id)) {
-    return Response.json({ error: 'user not found' }, { status: 404 });
+    return Response.json({ error: '用户不存在' }, { status: 404 });
   }
 
   let name = '';

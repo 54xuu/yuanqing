@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     const notes: Note[] = listNotes();
     return Response.json({ notes }, { status: 200 });
   } catch (err) {
-    return Response.json({ error: 'internal server error' }, { status: 500 });
+    return Response.json({ error: '服务器内部错误' }, { status: 500 });
   }
 }
 
@@ -38,12 +38,12 @@ export async function POST(request: Request) {
     try {
       body = await request.json();
     } catch {
-      return Response.json({ error: 'invalid JSON body' }, { status: 400 });
+      return Response.json({ error: '请求体格式无效' }, { status: 400 });
     }
 
     const title = typeof body?.title === 'string' ? body.title : '';
     if (!title) {
-      return Response.json({ error: 'title is required' }, { status: 400 });
+      return Response.json({ error: '标题为必填项' }, { status: 400 });
     }
 
     const folder_id =
@@ -53,6 +53,6 @@ export async function POST(request: Request) {
     const note = createNote({ folder_id, title, content });
     return Response.json({ note }, { status: 201 });
   } catch (err) {
-    return Response.json({ error: 'internal server error' }, { status: 500 });
+    return Response.json({ error: '服务器内部错误' }, { status: 500 });
   }
 }

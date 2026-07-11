@@ -1,0 +1,17 @@
+services:
+  yuanqing:
+    build: .
+    container_name: yuanqing
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - YUANQING_DB_PATH=/data/yuanqing.db
+      - NODE_ENV=production
+    volumes:
+      - yuanqing-data:/data
+    restart: unless-stopped
+
+volumes:
+  yuanqing-data:

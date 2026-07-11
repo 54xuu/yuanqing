@@ -14,12 +14,12 @@ export async function DELETE(
   const { id } = await params;
   const key = getApiKeyById(id);
   if (!key) {
-    return Response.json({ error: 'api key not found' }, { status: 404 });
+    return Response.json({ error: 'API密钥不存在' }, { status: 404 });
   }
 
   // Only the owner or an admin may delete.
   if (key.user_id !== auth.user.id && auth.user.role !== 'admin') {
-    return Response.json({ error: 'forbidden' }, { status: 403 });
+    return Response.json({ error: '权限不足' }, { status: 403 });
   }
 
   deleteApiKey(id);

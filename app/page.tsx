@@ -33,6 +33,28 @@ export default function Home() {
   const [foldersError, setFoldersError] = useState<string | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    const current = document.documentElement.getAttribute("data-theme") as
+      | "light"
+      | "dark"
+      | null;
+    if (current) setTheme(current);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", next);
+      try {
+        localStorage.setItem("theme", next);
+      } catch (e) {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -246,6 +268,14 @@ export default function Home() {
       <header className="app-header">
         <div className="app-title">源清 YuanQing</div>
         <div className="app-header-right">
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === "light" ? "切换到深色模式" : "切换到浅色模式"}
+            aria-label="切换主题"
+          >
+            {theme === "light" ? "🌙" : "☀️"}
+          </button>
           <div className="search-box">
             <input
               type="text"

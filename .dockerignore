@@ -8,7 +8,9 @@ dist
 .DS_Store
 coverage
 *.tsbuildinfo
+.git
+.gitignore
+.trae
+tests/style
 .env
 .env.local
-.trae
-*:Zone.Identifier

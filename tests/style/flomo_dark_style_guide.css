@@ -1,0 +1,38 @@
+/* flomo (Dark Mode) Design System Style Guide */
+
+:root {
+  /* 1. Color Palette */
+  --flomo-dark-primary: #00B96B;         /* Characteristic flomo Green - Main brand color, active states, tags, highlight buttons (remains green in dark mode) */
+  --flomo-dark-primary-hover: #009e5b;   /* Slightly darker green for hovers */
+  --flomo-dark-bg-main: #141414;         /* Rich dark gray/black background for the main viewport */
+  --flomo-dark-bg-card: #1F1F1F;         /* Dark gray background for content blocks (cards, inputs, sidebars) */
+  --flomo-dark-border: #2D2D2D;          /* Subtle dark gray borders separating panels and cards */
+  
+  /* Text Colors */
+  --flomo-dark-text-main: #E5E5E5;       /* High-contrast off-white for primary body text */
+  --flomo-dark-text-muted: #8E8E93;      /* Muted gray for timestamps, secondary labels, counts, and placeholders */
+  --flomo-dark-text-placeholder: #48484A;/* Darker gray for placeholder text */
+  --flomo-dark-text-on-primary: #FFFFFF; /* White text for green buttons/highlights */
+
+  /* Heatmap (Contribution Grid) Palette - Dark Mode Optimized */
+  --flomo-dark-heatmap-0: #262626;       /* Level 0: Empty/No records */
+  --flomo-dark-heatmap-1: #0A3622;       /* Level 1: Very dark green */
+  --flomo-dark-heatmap-2: #0F5234;       /* Level 2: Dark green */
+  --flomo-dark-heatmap-3: #198754;       /* Level 3: Medium green */
+  --flomo-dark-heatmap-4: #00B96B;       /* Level 4: Active primary green */
+
+  /* 2. Typography (Consistent with Light Mode) */
+  --flomo-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --flomo-font-size-base: 14px;     /* Standard content & note font size */
+  --flomo-font-size-sm: 12px;       /* Secondary details, meta info, tags */
+  --flomo-font-size-lg: 16px;       /* Main title, input fields, active headers */
+  --flomo-line-height-content: 1.6; /* Comfortable line height for long-form note reading */
+
+  /* 3. Spacing & Radius (Consistent with Light Mode) */
+  --flomo-radius-sm: 4px;           /* Small icons, tag boxes, heat map cells */
+  --flomo-radius-md: 8px;           /* Cards, input blocks, popup overlays */
+  --flomo-radius-lg: 12px;          /* Main panel layouts */
+  
+  --flomo-padding-card: 16px;       /* Consistent standard card padding */
+  --flomo-padding-sm: 8px;          /* Inner margins, compact menu items */
+}
