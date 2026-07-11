@@ -25,13 +25,18 @@ RUN groupadd -r app && useradd -r -g app app
 # Copy standalone build output
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-# Copy public assets if they exist
 # Copy better-sqlite3 native module (not bundled in standalone)
 COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 
+# Copy entrypoint script (fixes /data PVC ownership as root, then drops to app)
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 RUN mkdir -p /data && chown -R app:app /app /data
-USER app
+# NOTE: 不设置 USER app —— entrypoint 需以 root 启动以 chown /data PVC，
+# 然后通过 runuser 降权到 app 用户执行 node server.js
 VOLUME ["/data"]
 EXPOSE 3000
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "server.js"]

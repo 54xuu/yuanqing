@@ -1,3 +1,4 @@
+import { serverError, badRequest } from '@/lib/apiError';
 import { listUsers, createUser, getUserByUsername } from '@/lib/db';
 import { requireAdmin, toPublicUser } from '@/lib/auth';
 import type { UserRole } from '@/lib/db';
@@ -20,8 +21,8 @@ export async function POST(request: Request) {
     let body: { username?: unknown; password?: unknown; role?: unknown };
     try {
       body = await request.json();
-    } catch {
-      return Response.json({ error: '请求体格式无效' }, { status: 400 });
+    } catch (err) {
+      return badRequest('请求体格式无效', err);
     }
 
     const username = typeof body?.username === 'string' ? body.username.trim() : '';
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
 
     const user = createUser(username, password, role);
     return Response.json({ user: toPublicUser(user) }, { status: 201 });
-  } catch {
-    return Response.json({ error: '服务器内部错误' }, { status: 500 });
+  } catch (err) {
+    return serverError(err);
   }
 }

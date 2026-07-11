@@ -1,3 +1,4 @@
+import { serverError, badRequest } from '@/lib/apiError';
 import { listFolders, createFolder, type Folder } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -7,7 +8,7 @@ export async function GET() {
     const folders: Folder[] = listFolders();
     return Response.json({ folders }, { status: 200 });
   } catch (err) {
-    return Response.json({ error: '服务器内部错误' }, { status: 500 });
+    return serverError(err);
   }
 }
 
@@ -16,8 +17,8 @@ export async function POST(request: Request) {
     let body: { name?: unknown; parent_id?: string | null };
     try {
       body = await request.json();
-    } catch {
-      return Response.json({ error: '请求体格式无效' }, { status: 400 });
+    } catch (err) {
+      return badRequest('请求体格式无效', err);
     }
 
     const name = typeof body?.name === 'string' ? body.name : '';
@@ -31,6 +32,6 @@ export async function POST(request: Request) {
     const folder = createFolder(name, parent_id ?? null);
     return Response.json(folder, { status: 201 });
   } catch (err) {
-    return Response.json({ error: '服务器内部错误' }, { status: 500 });
+    return serverError(err);
   }
 }

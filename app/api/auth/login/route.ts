@@ -1,3 +1,4 @@
+import { serverError, badRequest } from '@/lib/apiError';
 import { getUserByUsername } from '@/lib/db';
 import { verifyPassword } from '@/lib/password';
 import { signSession, sessionCookieOptions, SESSION_COOKIE } from '@/lib/session';
@@ -49,8 +50,8 @@ export async function POST(request: Request) {
     let body: { username?: unknown; password?: unknown };
     try {
       body = await request.json();
-    } catch {
-      return Response.json({ error: '请求体格式无效' }, { status: 400 });
+    } catch (err) {
+      return badRequest('请求体格式无效', err);
     }
 
     const username = typeof body?.username === 'string' ? body.username.trim() : '';
@@ -88,7 +89,7 @@ export async function POST(request: Request) {
 
     recordFailedAttempt(ip);
     return Response.json({ error: '用户名或密码错误' }, { status: 401 });
-  } catch {
-    return Response.json({ error: '服务器内部错误' }, { status: 500 });
+  } catch (err) {
+    return serverError(err);
   }
 }

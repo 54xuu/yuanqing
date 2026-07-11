@@ -1,3 +1,4 @@
+import { serverError, badRequest } from '@/lib/apiError';
 import {
   listNotes,
   createNote,
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
     const notes: Note[] = listNotes();
     return Response.json({ notes }, { status: 200 });
   } catch (err) {
-    return Response.json({ error: '服务器内部错误' }, { status: 500 });
+    return serverError(err);
   }
 }
 
@@ -37,8 +38,8 @@ export async function POST(request: Request) {
     let body: { folder_id?: string | null; title?: unknown; content?: string };
     try {
       body = await request.json();
-    } catch {
-      return Response.json({ error: '请求体格式无效' }, { status: 400 });
+    } catch (err) {
+      return badRequest('请求体格式无效', err);
     }
 
     const title = typeof body?.title === 'string' ? body.title : '';
@@ -53,6 +54,6 @@ export async function POST(request: Request) {
     const note = createNote({ folder_id, title, content });
     return Response.json({ note }, { status: 201 });
   } catch (err) {
-    return Response.json({ error: '服务器内部错误' }, { status: 500 });
+    return serverError(err);
   }
 }
