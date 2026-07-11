@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Toast from "../components/Toast";
+import CopyDocumentIcon from "../components/CopyDocumentIcon";
 
 type PublicUser = {
   id: string;
@@ -27,6 +29,9 @@ export default function AdminPage() {
   const [newKey, setNewKey] = useState<string | null>(null);
   const [myKeyName, setMyKeyName] = useState("");
 
+  const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -35,6 +40,9 @@ export default function AdminPage() {
     Record<string, string>
   >({});
 
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState<"success" | "error">("success");
   const [msg, setMsg] = useState("");
   const isAdmin = me?.role === "admin";
 
@@ -72,7 +80,6 @@ export default function AdminPage() {
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users ?? []);
-        // Load each user's keys.
         const byUser: Record<string, ApiKey[]> = {};
         await Promise.all(
           (data.users ?? []).map(async (u: PublicUser) => {
@@ -139,6 +146,45 @@ export default function AdminPage() {
       await loadMyKeys();
     } catch {
       setMsg("网络错误");
+    }
+  };
+
+  const saveKeyName = async (id: string) => {
+    setMsg("");
+    try {
+      const res = await fetch(`/api/api-keys/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editingName }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data?.error || "修改失败");
+        return;
+      }
+      setEditingKeyId(null);
+      setEditingName("");
+      await loadMyKeys();
+    } catch {
+      setMsg("网络错误");
+    }
+  };
+
+  const cancelEditName = () => {
+    setEditingKeyId(null);
+    setEditingName("");
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setToastMessage("已复制到剪贴板");
+      setToastType("success");
+      setToastVisible(true);
+    } catch {
+      setToastMessage("复制失败，请手动复制");
+      setToastType("error");
+      setToastVisible(true);
     }
   };
 
@@ -209,8 +255,8 @@ export default function AdminPage() {
       const res = await fetch(`/api/api-keys/${keyId}`, {
         method: "DELETE",
       });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         setMsg(data?.error || "删除密钥失败");
         return;
       }
@@ -226,6 +272,12 @@ export default function AdminPage() {
 
   return (
     <div className="admin-page">
+      <Toast
+        message={toastMessage}
+        type={toastType}
+        visible={toastVisible}
+        onClose={() => setToastVisible(false)}
+      />
       <div className="admin-header">
         <h1>后台管理</h1>
         <div className="admin-nav">
@@ -243,7 +295,6 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* My API Keys */}
       <div className="card">
         <div className="card-title">我的 API 密钥</div>
         {newKey && (
@@ -253,6 +304,14 @@ export default function AdminPage() {
             </div>
             <div className="key-highlight" data-testid="new-api-key">
               {newKey}
+              <button
+                className="copy-btn"
+                title="复制"
+                style={{ marginLeft: 8 }}
+                onClick={() => copyToClipboard(newKey)}
+              >
+                <CopyDocumentIcon size={14} />
+              </button>
             </div>
           </div>
         )}
@@ -282,10 +341,52 @@ export default function AdminPage() {
             <tbody>
               {myKeys.map((k) => (
                 <tr key={k.id}>
-                  <td>{k.name || "-"}</td>
-                  <td className="mono">{k.key}</td>
+                  <td>
+                    {editingKeyId === k.id ? (
+                      <div className="inline-form">
+                        <input
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          autoFocus
+                        />
+                        <button
+                          className="small-btn primary"
+                          onClick={() => saveKeyName(k.id)}
+                        >
+                          保存
+                        </button>
+                        <button className="small-btn" onClick={cancelEditName}>
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      k.name || "-"
+                    )}
+                  </td>
+                  <td className="mono">
+                    {k.key}
+                    <button
+                      className="copy-btn"
+                      title="复制"
+                      style={{ marginLeft: 8 }}
+                      onClick={() => copyToClipboard(k.key)}
+                    >
+                      <CopyDocumentIcon size={14} />
+                    </button>
+                  </td>
                   <td className="muted">{k.created_at}</td>
                   <td>
+                    <button
+                      className="link-btn"
+                      onClick={() => {
+                        setEditingKeyId(k.id);
+                        setEditingName(k.name);
+                      }}
+                      style={{ marginRight: 8 }}
+                    >
+                      修改
+                    </button>
                     <button
                       className="link-btn danger-btn"
                       onClick={() => deleteMyKey(k.id)}
@@ -300,7 +401,6 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* User Management (admin only) */}
       {isAdmin && (
         <div className="card">
           <div className="card-title">用户管理</div>
@@ -342,15 +442,30 @@ export default function AdminPage() {
                       <div
                         className="key-highlight"
                         style={{ marginBottom: 8 }}
-                        data-testid={`new-key-${u.id}`}
+                        data-testid={"new-key-" + u.id}
                       >
                         {createdKeyForUser[u.id]}
+                        <button
+                          className="copy-btn"
+                          title="复制"
+                          style={{ marginLeft: 8 }}
+                          onClick={() => copyToClipboard(createdKeyForUser[u.id])}
+                        >
+                          <CopyDocumentIcon size={14} />
+                        </button>
                       </div>
                     )}
                     <div>
                       {(userKeys[u.id] ?? []).map((k) => (
                         <div key={k.id} className="mono" style={{ marginBottom: 4 }}>
                           {k.key}{" "}
+                          <button
+                            className="copy-btn"
+                            title="复制"
+                            onClick={() => copyToClipboard(k.key)}
+                          >
+                            <CopyDocumentIcon size={14} />
+                          </button>{" "}
                           <button
                             className="link-btn danger-btn"
                             onClick={() => deleteKeyForUser(k.id)}

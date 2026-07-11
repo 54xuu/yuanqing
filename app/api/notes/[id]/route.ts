@@ -25,7 +25,12 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    let body: { title?: string; content?: string };
+    let body: {
+      title?: string;
+      content?: string;
+      folder_id?: string | null;
+      sort_order?: number;
+    };
     try {
       body = await request.json();
     } catch (err) {
@@ -33,8 +38,11 @@ export async function PUT(
     }
 
     const note = updateNote(id, {
-      title: typeof body?.title === 'string' ? body.title : undefined,
-      content: typeof body?.content === 'string' ? body.content : undefined,
+      title: typeof body.title === 'string' ? body.title : undefined,
+      content: typeof body.content === 'string' ? body.content : undefined,
+      folder_id:
+        body.folder_id === undefined ? undefined : (body.folder_id ?? null),
+      sort_order: typeof body.sort_order === 'number' ? body.sort_order : undefined,
     });
     if (!note) {
       return Response.json({ error: '笔记不存在' }, { status: 404 });

@@ -25,24 +25,30 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    let body: { name?: unknown };
+    let body: { name?: string; parent_id?: string | null; sort_order?: number };
     try {
       body = await request.json();
     } catch (err) {
       return badRequest('请求体格式无效', err);
     }
 
-    const name = typeof body?.name === 'string' ? body.name : '';
-    if (!name) {
-      return Response.json({ error: '名称为必填项' }, { status: 400 });
-    }
-
-    const folder = updateFolder(id, name);
+    const folder = updateFolder(id, {
+      name: typeof body.name === 'string' ? body.name : undefined,
+      parent_id:
+        body.parent_id === undefined ? undefined : (body.parent_id ?? null),
+      sort_order: typeof body.sort_order === 'number' ? body.sort_order : undefined,
+    });
     if (!folder) {
       return Response.json({ error: '文件夹不存在' }, { status: 404 });
     }
     return Response.json({ folder }, { status: 200 });
   } catch (err) {
+    if (err instanceof Error && err.message === 'cycle') {
+      return Response.json(
+        { error: '不能将文件夹移动到其子级下' },
+        { status: 400 }
+      );
+    }
     return serverError(err);
   }
 }

@@ -12,6 +12,7 @@ import {
   getFolder,
   updateFolder,
   deleteFolder,
+  getNoteByPath,
   type Note,
   type Folder,
 } from '../lib/db';
@@ -190,7 +191,7 @@ describe('folder CRUD: createFolder / getFolder / updateFolder / deleteFolder', 
     expect(fetched!.name).toBe(name);
 
     const newName = `Renamed ${randomId()}`;
-    const updated = updateFolder(created.id, newName);
+    const updated = updateFolder(created.id, { name: newName });
     expect(updated).not.toBeNull();
     expect(updated!.id).toBe(created.id);
     expect(updated!.name).toBe(newName);
@@ -212,6 +213,43 @@ describe('listFolders', () => {
     expect(Array.isArray(folders)).toBe(true);
     expect(folders.length).toBeGreaterThanOrEqual(1);
     expect(folders.some((f) => f.name === '源清')).toBe(true);
+  });
+});
+
+describe('getNoteByPath', () => {
+  it('resolves a note by its slash-separated path', () => {
+    const folderName = `PathFolder ${randomId()}`;
+    const noteTitle = `PathNote ${randomId()}`;
+    const folder = createFolder(folderName, null);
+    createdFolderIds.push(folder.id);
+    const note = createNote({ folder_id: folder.id, title: noteTitle, content: 'path content' });
+    createdNoteIds.push(note.id);
+
+    const fetched = getNoteByPath(`${folderName}/${noteTitle}`);
+    expect(fetched).not.toBeNull();
+    expect(fetched!.id).toBe(note.id);
+    expect(fetched!.title).toBe(noteTitle);
+    expect(fetched!.content).toBe('path content');
+  });
+
+  it('returns null when the path does not exist', () => {
+    expect(getNoteByPath('不存在的目录/笔记')).toBeNull();
+  });
+
+  it('resolves a 3-level deep path', () => {
+    const a = `L3A ${randomId()}`;
+    const b = `L3B ${randomId()}`;
+    const t = `L3Note ${randomId()}`;
+    const folderA = createFolder(a, null);
+    createdFolderIds.push(folderA.id);
+    const folderB = createFolder(b, folderA.id);
+    createdFolderIds.push(folderB.id);
+    const note = createNote({ folder_id: folderB.id, title: t, content: 'deep' });
+    createdNoteIds.push(note.id);
+
+    const fetched = getNoteByPath(`${a}/${b}/${t}`);
+    expect(fetched).not.toBeNull();
+    expect(fetched!.id).toBe(note.id);
   });
 });
 

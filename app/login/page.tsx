@@ -49,7 +49,7 @@ function LoginForm() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={onSubmit}>
-        <div className="auth-title">源清 YuanQing 登录</div>
+        <div className="auth-title-container"><div className="auth-title">源清 YuanQing 登录</div><div className="auth-version">v1.5</div></div>
         <div className="auth-form">
           <div className="auth-field">
             <label className="auth-label" htmlFor="username">

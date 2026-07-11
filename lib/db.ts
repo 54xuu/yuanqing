@@ -8,6 +8,7 @@ export interface Folder {
   name: string;
   parent_id: string | null;
   created_at: string;
+  sort_order: number;
 }
 
 export interface Note {
@@ -17,6 +18,7 @@ export interface Note {
   content: string;
   created_at: string;
   updated_at: string;
+  sort_order: number;
 }
 
 export interface NoteSummary {
@@ -52,6 +54,13 @@ type DB = Database.Database;
 const DB_PATH = process.env.YUANQING_DB_PATH || './yuanqing.db';
 
 let dbInstance: DB | null = null;
+
+function ensureColumn(db: DB, table: string, column: string, definition: string): void {
+  const cols = db.prepare('PRAGMA table_info(' + table + ')').all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + definition);
+  }
+}
 
 function initSchema(db: DB): void {
   db.pragma('journal_mode = WAL');
@@ -104,53 +113,14 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_apikey_user ON ApiKey(user_id);
     CREATE INDEX IF NOT EXISTS idx_apikey_key ON ApiKey(key);
   `);
+
+  ensureColumn(db, 'Folder', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'Note', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0');
 }
 
-const INTRO_NOTE_CONTENT = `# 自我介绍
+const INTRO_NOTE_CONTENT = '# 自我介绍\n\n你好，我是张源（Zhang Yuan），一名专注于知识工具与开发者体验的软件工程师。\n\n## 简介\n- 目前主导源清（YuanQing）项目，专注于本地优先的知识管理工具与 AI Agent 集成\n- 5 年全栈开发经验，擅长 TypeScript、Node.js、React 与 SQLite\n- 热衷于把复杂的检索与上下文管理问题，转化为简洁可复用的工程方案\n\n## 技能栈\n- 前端：React 19、Next.js（App Router）、TailwindCSS\n- 后端：Node.js、Next.js API Routes、better-sqlite3\n- AI 集成：MCP（Model Context Protocol）、Prompt 工程、向量检索\n- 工程化：Vitest、GitHub Actions、Docker\n\n## 联系方式\n- Email：zhangyuan@example.com\n- GitHub：github.com/zhangyuan\n\n把这条笔记交给 AI，它就能在对话中准确还原我的身份与背景。\n';
 
-你好，我是张源（Zhang Yuan），一名专注于知识工具与开发者体验的软件工程师。
-
-## 简介
-- 目前主导源清（YuanQing）项目，专注于本地优先的知识管理工具与 AI Agent 集成
-- 5 年全栈开发经验，擅长 TypeScript、Node.js、React 与 SQLite
-- 热衷于把复杂的检索与上下文管理问题，转化为简洁可复用的工程方案
-
-## 技能栈
-- 前端：React 19、Next.js（App Router）、TailwindCSS
-- 后端：Node.js、Next.js API Routes、better-sqlite3
-- AI 集成：MCP（Model Context Protocol）、Prompt 工程、向量检索
-- 工程化：Vitest、GitHub Actions、Docker
-
-## 联系方式
-- Email：zhangyuan@example.com
-- GitHub：github.com/zhangyuan
-
-把这条笔记交给 AI，它就能在对话中准确还原我的身份与背景。
-`;
-
-const PRODUCT_NOTE_CONTENT = `# 产品介绍：源清（YuanQing）
-
-## 定位
-源清是一款本地优先（local-first）的私有知识库，沉淀你的个人上下文，并通过 MCP Server 让任意支持 MCP 的 AI Agent 自动检索读取。
-
-## 核心痛点
-1. **重复喂料**：每次和不同 AI 对话都要重新粘贴自我介绍、产品背景
-2. **信息孤岛**：笔记散落在多个应用，AI 无法统一访问
-3. **检索困难**：长文档里找不到关键句，人工翻阅效率低
-
-## 解决方案
-- 用 SQLite + FTS5 提供毫秒级全文检索
-- 用 Folder/Note 结构化组织个人上下文
-- 暴露 MCP 工具 \`search_notes(query)\` 与 \`get_note(id)\`，Agent 主动按需拉取
-
-## 目标用户
-- 频繁与多个 AI Agent 协作的开发者
-- 需要稳定可复用「人设/产品背景」的独立开发者与小团队
-- 重视数据私有、希望本地存储的从业者
-
-## MCP 集成
-源清自带一个 stdio 模式的 MCP Server，可在 Claude Desktop、Trae 等支持 MCP 的客户端中直接配置，无需额外认证。Agent 调用 \`search_notes\` 获取候选笔记摘要，再调用 \`get_note\` 读取完整 Markdown，即可在对话中引用你的知识。
-`;
+const PRODUCT_NOTE_CONTENT = '# 产品介绍：源清（YuanQing）\n\n## 定位\n源清是一款本地优先（local-first）的私有知识库，沉淀你的个人上下文，并通过 MCP Server 让任意支持 MCP 的 AI Agent 自动检索读取。\n\n## 核心痛点\n1. **重复喂料**：每次和不同 AI 对话都要重新粘贴自我介绍、产品背景\n2. **信息孤岛**：笔记散落在多个应用，AI 无法统一访问\n3. **检索困难**：长文档里找不到关键句，人工翻阅效率低\n\n## 解决方案\n- 用 SQLite + FTS5 提供毫秒级全文检索\n- 用 Folder/Note 结构化组织个人上下文\n- 暴露 MCP 工具 search_notes(query) 与 get_note(id)，Agent 主动按需拉取\n\n## 目标用户\n- 频繁与多个 AI Agent 协作的开发者\n- 需要稳定可复用「人设/产品背景」的独立开发者与小团队\n- 重视数据私有、希望本地存储的从业者\n\n## MCP 集成\n源清自带一个 stdio 模式的 MCP Server，可在 Claude Desktop、Trae 等支持 MCP 的客户端中直接配置，无需额外认证。Agent 调用 search_notes 获取候选笔记摘要，再调用 get_note 读取完整 Markdown，即可在对话中引用你的知识。\n';
 
 function seedIfEmpty(db: DB): void {
   const row = db.prepare('SELECT COUNT(*) AS cnt FROM Note').get() as { cnt: number };
@@ -160,21 +130,21 @@ function seedIfEmpty(db: DB): void {
 
   const folderId = uuidv4();
   db.prepare(
-    'INSERT INTO Folder (id, name, parent_id, created_at) VALUES (?, ?, ?, ?)'
-  ).run(folderId, '源清', null, now);
+    'INSERT INTO Folder (id, name, parent_id, created_at, sort_order) VALUES (?, ?, ?, ?, ?)'
+  ).run(folderId, '源清', null, now, 0);
 
   const introId = uuidv4();
   db.prepare(
-    'INSERT INTO Note (id, folder_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(introId, folderId, '自我介绍', INTRO_NOTE_CONTENT, now, now);
+    'INSERT INTO Note (id, folder_id, title, content, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(introId, folderId, '自我介绍', INTRO_NOTE_CONTENT, now, now, 0);
   db.prepare(
     'INSERT INTO Note_fts (note_id, title, content) VALUES (?, ?, ?)'
   ).run(introId, '自我介绍', INTRO_NOTE_CONTENT);
 
   const productId = uuidv4();
   db.prepare(
-    'INSERT INTO Note (id, folder_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(productId, folderId, '产品介绍', PRODUCT_NOTE_CONTENT, now, now);
+    'INSERT INTO Note (id, folder_id, title, content, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(productId, folderId, '产品介绍', PRODUCT_NOTE_CONTENT, now, now, 1);
   db.prepare(
     'INSERT INTO Note_fts (note_id, title, content) VALUES (?, ?, ?)'
   ).run(productId, '产品介绍', PRODUCT_NOTE_CONTENT);
@@ -189,7 +159,6 @@ function seedAdmin(db: DB): void {
   const now = new Date().toISOString();
   const password = process.env.YUANQING_ADMIN_PASSWORD;
   if (!password || password.length < 8) {
-    // SECURITY: no hardcoded default. Generate a random password and print it once.
     const generated = randomBytes(12).toString('base64url');
     console.warn('[security] No YUANQING_ADMIN_PASSWORD set (or < 8 chars).');
     console.warn('[security] Generated random admin password (save it now):');
@@ -215,21 +184,54 @@ export function getDb(): DB {
   return db;
 }
 
-// ---------- Folders ----------
+function getMaxFolderSortOrder(parent_id: string | null): number {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM Folder WHERE parent_id IS ?')
+    .get(parent_id) as { m: number };
+  return row.m;
+}
+
+function getMaxNoteSortOrder(folder_id: string | null): number {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM Note WHERE folder_id IS ?')
+    .get(folder_id) as { m: number };
+  return row.m;
+}
+
+function isDescendant(folderId: string, ancestorId: string): boolean {
+  const db = getDb();
+  let currentId: string | null = ancestorId;
+  const visited = new Set<string>();
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    if (currentId === folderId) return true;
+    const row = db
+      .prepare('SELECT parent_id FROM Folder WHERE id = ?')
+      .get(currentId) as { parent_id: string | null } | undefined;
+    if (!row) return false;
+    currentId = row.parent_id;
+  }
+  return false;
+}
 
 export function listFolders(): Folder[] {
   const db = getDb();
-  return db.prepare('SELECT * FROM Folder ORDER BY name ASC').all() as Folder[];
+  return db
+    .prepare('SELECT * FROM Folder ORDER BY sort_order ASC, name ASC')
+    .all() as Folder[];
 }
 
 export function createFolder(name: string, parent_id: string | null): Folder {
   const db = getDb();
   const id = uuidv4();
   const created_at = new Date().toISOString();
+  const sort_order = getMaxFolderSortOrder(parent_id) + 1;
   db.prepare(
-    'INSERT INTO Folder (id, name, parent_id, created_at) VALUES (?, ?, ?, ?)'
-  ).run(id, name, parent_id, created_at);
-  return { id, name, parent_id, created_at };
+    'INSERT INTO Folder (id, name, parent_id, created_at, sort_order) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, name, parent_id, created_at, sort_order);
+  return { id, name, parent_id, created_at, sort_order };
 }
 
 export function getFolder(id: string): Folder | null {
@@ -249,10 +251,34 @@ export function getFolderByParentAndName(
   return row ?? null;
 }
 
-export function updateFolder(id: string, name: string): Folder | null {
+export interface FolderUpdateInput {
+  name?: string;
+  parent_id?: string | null;
+  sort_order?: number;
+}
+
+export function updateFolder(id: string, input: FolderUpdateInput): Folder | null {
   const db = getDb();
-  const result = db.prepare('UPDATE Folder SET name = ? WHERE id = ?').run(name, id);
-  if (result.changes === 0) return null;
+  const existing = getFolder(id);
+  if (!existing) return null;
+
+  const name = input.name ?? existing.name;
+  const sort_order = input.sort_order ?? existing.sort_order;
+  const parent_id = input.parent_id === undefined ? existing.parent_id : input.parent_id;
+
+  if (parent_id !== null && parent_id === id) {
+    throw new Error('cycle');
+  }
+  if (parent_id !== null && parent_id !== existing.parent_id) {
+    if (isDescendant(id, parent_id)) {
+      throw new Error('cycle');
+    }
+  }
+
+  db.prepare(
+    'UPDATE Folder SET name = ?, parent_id = ?, sort_order = ? WHERE id = ?'
+  ).run(name, parent_id, sort_order, id);
+
   return getFolder(id);
 }
 
@@ -262,15 +288,15 @@ export function deleteFolder(id: string): boolean {
   return result.changes > 0;
 }
 
-// ---------- Notes ----------
-
 export function listNotes(folder_id?: string | null): Note[] {
   const db = getDb();
   if (folder_id === undefined) {
-    return db.prepare('SELECT * FROM Note ORDER BY updated_at DESC').all() as Note[];
+    return db
+      .prepare('SELECT * FROM Note ORDER BY sort_order ASC, updated_at DESC')
+      .all() as Note[];
   }
   return db
-    .prepare('SELECT * FROM Note WHERE folder_id IS ? ORDER BY updated_at DESC')
+    .prepare('SELECT * FROM Note WHERE folder_id IS ? ORDER BY sort_order ASC, updated_at DESC')
     .all(folder_id) as Note[];
 }
 
@@ -278,6 +304,7 @@ export function createNote(input: {
   folder_id?: string | null;
   title: string;
   content?: string;
+  sort_order?: number;
 }): Note {
   const db = getDb();
   const id = uuidv4();
@@ -285,17 +312,18 @@ export function createNote(input: {
   const title = input.title;
   const content = input.content ?? '';
   const now = new Date().toISOString();
+  const sort_order = input.sort_order ?? getMaxNoteSortOrder(folder_id) + 1;
 
   db.prepare(
-    'INSERT INTO Note (id, folder_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(id, folder_id, title, content, now, now);
+    'INSERT INTO Note (id, folder_id, title, content, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, folder_id, title, content, now, now, sort_order);
   db.prepare('INSERT INTO Note_fts (note_id, title, content) VALUES (?, ?, ?)').run(
     id,
     title,
     content
   );
 
-  return { id, folder_id, title, content, created_at: now, updated_at: now };
+  return { id, folder_id, title, content, created_at: now, updated_at: now, sort_order };
 }
 
 export function getNote(id: string): Note | null {
@@ -315,24 +343,28 @@ export function getNoteByFolderAndTitle(
   return row ?? null;
 }
 
-export function updateNote(
-  id: string,
-  input: { title?: string; content?: string }
-): Note | null {
+export interface NoteUpdateInput {
+  title?: string;
+  content?: string;
+  folder_id?: string | null;
+  sort_order?: number;
+}
+
+export function updateNote(id: string, input: NoteUpdateInput): Note | null {
   const db = getDb();
   const existing = getNote(id);
   if (!existing) return null;
 
   const title = input.title ?? existing.title;
   const content = input.content ?? existing.content;
+  const folder_id =
+    input.folder_id === undefined ? existing.folder_id : input.folder_id;
+  const sort_order = input.sort_order ?? existing.sort_order;
   const updated_at = new Date().toISOString();
 
-  db.prepare('UPDATE Note SET title = ?, content = ?, updated_at = ? WHERE id = ?').run(
-    title,
-    content,
-    updated_at,
-    id
-  );
+  db.prepare(
+    'UPDATE Note SET title = ?, content = ?, folder_id = ?, sort_order = ?, updated_at = ? WHERE id = ?'
+  ).run(title, content, folder_id, sort_order, updated_at, id);
 
   db.prepare('DELETE FROM Note_fts WHERE note_id = ?').run(id);
   db.prepare('INSERT INTO Note_fts (note_id, title, content) VALUES (?, ?, ?)').run(
@@ -341,7 +373,7 @@ export function updateNote(
     content
   );
 
-  return { ...existing, title, content, updated_at };
+  return { ...existing, title, content, folder_id, sort_order, updated_at };
 }
 
 export function deleteNote(id: string): boolean {
@@ -351,14 +383,28 @@ export function deleteNote(id: string): boolean {
   return result.changes > 0;
 }
 
-// ---------- Search ----------
+export function getNoteByPath(path: string): Note | null {
+  const normalized = path.trim().replace(/^\/+|\/+$/g, '');
+  if (!normalized) return null;
+  const segments = normalized.split(/\/+/).filter((s) => s.length > 0);
+  const title = segments.pop();
+  if (!title) return null;
+
+  let parentId: string | null = null;
+  for (const seg of segments) {
+    const folder = getFolderByParentAndName(parentId, seg);
+    if (!folder) return null;
+    parentId = folder.id;
+  }
+  return getNoteByFolderAndTitle(parentId, title);
+}
 
 export function toFtsQuery(query: string): string {
   const trimmed = query.trim();
   if (!trimmed) return '';
   return trimmed
     .split(/\s+/)
-    .map((token) => `"${token.replace(/"/g, '""')}"`)
+    .map((token) => '"' + token.replace(/"/g, '""') + '"')
     .join(' ');
 }
 
@@ -368,16 +414,10 @@ export function searchNotes(query: string): NoteSummary[] {
   const db = getDb();
   return db
     .prepare(
-      `SELECT note_id AS id, title, snippet(Note_fts, 2, '', '', '...', 24) AS summary
-       FROM Note_fts
-       WHERE Note_fts MATCH ?
-       ORDER BY rank
-       LIMIT 20`
+      'SELECT note_id AS id, title, snippet(Note_fts, 2, ?, ?, ?, 24) AS summary FROM Note_fts WHERE Note_fts MATCH ? ORDER BY rank LIMIT 20'
     )
-    .all(ftsQuery) as NoteSummary[];
+    .all('', '', '...', ftsQuery) as NoteSummary[];
 }
-
-// ---------- Users ----------
 
 function generateApiKeyString(): string {
   return 'yq_' + uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '').slice(0, 8);
@@ -420,13 +460,10 @@ export function createUser(
 
 export function deleteUser(id: string): boolean {
   const db = getDb();
-  // SQLite needs PRAGMA foreign_keys=ON to cascade; do explicit cleanup to be safe.
   db.prepare('DELETE FROM ApiKey WHERE user_id = ?').run(id);
   const result = db.prepare('DELETE FROM User WHERE id = ?').run(id);
   return result.changes > 0;
 }
-
-// ---------- API Keys ----------
 
 export function createApiKey(
   userId: string,
@@ -453,9 +490,7 @@ export function listAllApiKeys(): ApiKeyWithUsername[] {
   const db = getDb();
   return db
     .prepare(
-      `SELECT ApiKey.*, User.username AS username
-       FROM ApiKey JOIN User ON ApiKey.user_id = User.id
-       ORDER BY ApiKey.created_at DESC`
+      'SELECT ApiKey.*, User.username AS username FROM ApiKey JOIN User ON ApiKey.user_id = User.id ORDER BY ApiKey.created_at DESC'
     )
     .all() as ApiKeyWithUsername[];
 }
@@ -470,6 +505,14 @@ export function getApiKeyById(id: string): ApiKey | null {
   const db = getDb();
   const row = db.prepare('SELECT * FROM ApiKey WHERE id = ?').get(id) as ApiKey | undefined;
   return row ?? null;
+}
+
+export function updateApiKey(id: string, name: string): ApiKey | null {
+  const db = getDb();
+  const existing = getApiKeyById(id);
+  if (!existing) return null;
+  db.prepare('UPDATE ApiKey SET name = ? WHERE id = ?').run(name, id);
+  return { ...existing, name };
 }
 
 export function deleteApiKey(id: string): boolean {

@@ -160,3 +160,304 @@ input::placeholder, textarea::placeholder { color: var(--color-text-placeholder)
 /* Dark mode card shadow override */
 [data-theme="dark"] .auth-card { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
 [data-theme="dark"] .card { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); }
+
+/* ---------- Modal Overlay ---------- */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  min-width: 320px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+[data-theme="dark"] .modal {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--color-text-main);
+}
+
+.modal-field {
+  margin-bottom: 12px;
+}
+
+.modal-field label {
+  display: block;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.modal-field input,
+.modal-field select {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  outline: none;
+  background: var(--color-bg-input);
+  color: var(--color-text-main);
+}
+
+.modal-field input:focus,
+.modal-field select:focus {
+  border-color: var(--color-primary);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* ---------- Text Button ---------- */
+.text-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-primary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.text-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-primary-hover);
+}
+
+.text-btn.danger {
+  color: var(--color-danger);
+}
+
+.text-btn.danger:hover {
+  background: var(--color-danger-bg);
+}
+
+/* ---------- Tree Select Dropdown ---------- */
+.tree-select {
+  position: relative;
+  width: 100%;
+}
+
+.tree-select-trigger {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  outline: none;
+  background: var(--color-bg-input);
+  color: var(--color-text-main);
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tree-select-trigger:hover {
+  border-color: var(--color-primary);
+}
+
+.tree-select-trigger::after {
+  content: "▼";
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.tree-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 1001;
+}
+
+[data-theme="dark"] .tree-select-dropdown {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.tree-select-option {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--color-text-main);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.tree-select-option:hover {
+  background: var(--color-bg-hover);
+}
+
+.tree-select-option.selected {
+  background: var(--color-bg-selected);
+  color: var(--color-text-selected);
+}
+
+.tree-select-option .tree-prefix {
+  color: var(--color-text-muted);
+  margin-right: 4px;
+}
+
+/* ---------- Folder Edit Button ---------- */
+.folder-edit-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.folder-row:hover .folder-edit-btn {
+  opacity: 1;
+}
+
+.folder-edit-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-primary);
+}
+
+/* ---------- Note Row Buttons ---------- */
+.note-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ---------- Version Badge ---------- */
+.app-title-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.app-version {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding-top: 4px;
+}
+
+.auth-title-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  justify-content: center;
+}
+
+.auth-version {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding-top: 4px;
+}
+
+/* ---------- Toast (Element Plus Style) ---------- */
+.toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #ffffff;
+  z-index: 2000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: toastFadeIn 0.3s ease-out;
+}
+
+.toast-success {
+  background: #00B96B;
+}
+
+.toast-error {
+  background: #F56C6C;
+}
+
+.toast-warning {
+  background: #E6A23C;
+}
+
+.toast-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.toast-message {
+  line-height: 1.5;
+}
+
+@keyframes toastFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

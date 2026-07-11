@@ -13,13 +13,13 @@ interface NoteEditorProps {
 export default function NoteEditor({ note, onSave }: NoteEditorProps) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [preview, setPreview] = useState(false);
+  const [preview, setPreview] = useState(true);
 
   useEffect(() => {
     if (note) {
       setTitle(note.title);
       setContent(note.content);
-      setPreview(false);
+      setPreview(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.id]);

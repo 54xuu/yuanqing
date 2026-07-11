@@ -10,6 +10,7 @@ import {
   createFolder,
   createNote,
   updateNote,
+  getNoteByPath,
   type Note,
   type NoteSummary,
 } from '../lib/db';
@@ -97,6 +98,23 @@ export async function handleUpsertNote({
   return { action: 'created', note };
 }
 
+export type GetNoteByPathResult = { note: Note } | { error: string; path: string };
+
+/**
+ * Look up a note by its slash-separated path. The last segment is the note
+ * title; preceding segments name a nested folder hierarchy. Returns the note
+ * or { error: 'note not found', path } if no note exists at that path.
+ */
+export async function handleGetNoteByPath({
+  path,
+}: {
+  path: string;
+}): Promise<GetNoteByPathResult> {
+  const note = getNoteByPath(path);
+  if (!note) return { error: 'note not found', path };
+  return { note };
+}
+
 // ---------- MCP tool registrations (wrap handlers in MCP envelope) ----------
 
 function registerTools(server: McpServer): void {
@@ -152,6 +170,32 @@ function registerTools(server: McpServer): void {
     },
     async ({ path, content }) => {
       const data = await handleUpsertNote({ path, content });
+      const isError = 'error' in data;
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+        ...(isError ? { isError: true } : {}),
+      };
+    }
+  );
+
+  // Tool: get_note_by_path
+  server.tool(
+    'get_note_by_path',
+    'Get the full content of a note by its slash-separated path. Use the exact path used to create the note via upsert_note (e.g. "目录A/子目录B/笔记D"). Returns the full note object, or { error: "note not found", path } if no note exists at that path.',
+    {
+      path: z
+        .string()
+        .describe(
+          'Slash-separated note path, e.g. "目录A/笔记B" or "根级笔记".'
+        ),
+    },
+    async ({ path }) => {
+      const data = await handleGetNoteByPath({ path });
       const isError = 'error' in data;
       return {
         content: [

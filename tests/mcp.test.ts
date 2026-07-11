@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { handleSearchNotes, handleGetNote, handleUpsertNote } from '../mcp-server/index';
+import { handleSearchNotes, handleGetNote, handleGetNoteByPath, handleUpsertNote } from '../mcp-server/index';
 import {
   createNote,
   deleteNote,
@@ -172,5 +172,41 @@ describe('handleUpsertNote', () => {
       expect(found!.id).toBe(data.note.id);
       expect(getNote(data.note.id)).not.toBeNull();
     }
+  });
+});
+
+describe('handleGetNoteByPath', () => {
+  it('returns { note } for an existing nested path', async () => {
+    const folderName = `PathFolder ${randomId()}`;
+    const title = `PathNote ${randomId()}`;
+    const content = `path-${randomId()}`;
+    const upserted = await handleUpsertNote({ path: `${folderName}/${title}`, content });
+    if ('action' in upserted) {
+      createdNoteIds.push(upserted.note.id);
+      const folder = getFolderByParentAndName(null, folderName);
+      if (folder) createdFolderIds.push(folder.id);
+    }
+
+    const data = await handleGetNoteByPath({ path: `${folderName}/${title}` });
+    expect('note' in data).toBe(true);
+    if ('note' in data) {
+      expect(data.note.title).toBe(title);
+      expect(data.note.content).toBe(content);
+    }
+  });
+
+  it('returns { error, path } for a non-existent path', async () => {
+    const path = `MissingFolder ${randomId()}/MissingNote ${randomId()}`;
+    const data = await handleGetNoteByPath({ path });
+    expect('error' in data).toBe(true);
+    if ('error' in data) {
+      expect(data.error).toBe('note not found');
+      expect(data.path).toBe(path);
+    }
+  });
+
+  it('returns { error } for an empty path', async () => {
+    const data = await handleGetNoteByPath({ path: '   ' });
+    expect('error' in data).toBe(true);
   });
 });

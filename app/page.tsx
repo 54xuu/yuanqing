@@ -154,6 +154,47 @@ export default function Home() {
     [refreshFolders]
   );
 
+  const updateFolder = useCallback(
+    async (
+      id: string,
+      data: { name: string; parent_id: string | null; sort_order: number }
+    ) => {
+      try {
+        const res = await fetch(`/api/folders/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          if (err?.error) alert(err.error);
+          throw new Error("failed to update folder");
+        }
+        await refreshFolders();
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [refreshFolders]
+  );
+
+  const deleteFolder = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch(`/api/folders/${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("failed to delete folder");
+        if (selectedFolderId === id) {
+          setSelectedFolderId("all");
+        }
+        await refreshFolders();
+        await refreshNotes();
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [refreshFolders, refreshNotes, selectedFolderId]
+  );
+
   const createNote = useCallback(
     async (folderId: string | null) => {
       try {
@@ -215,6 +256,33 @@ export default function Home() {
     [refreshNotes]
   );
 
+  const updateNote = useCallback(
+    async (
+      id: string,
+      data: { title: string; folder_id: string | null; sort_order: number }
+    ) => {
+      try {
+        const res = await fetch(`/api/notes/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error("failed to update note");
+        await refreshNotes();
+        if (selectedNoteId === id) {
+          const r = await fetch(`/api/notes/${id}`);
+          if (r.ok) {
+            const d = await r.json();
+            setSelectedNote(d.note ?? null);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [refreshNotes, selectedNoteId]
+  );
+
   const runSearch = useCallback(async (q: string) => {
     const query = q.trim();
     setSearchQuery(query);
@@ -253,7 +321,6 @@ export default function Home() {
     createNote(folderId);
   };
 
-  // Filter notes client-side based on the selected folder.
   const visibleNotes: Note[] = (() => {
     if (selectedFolderId === "all") return notes;
     if (selectedFolderId === null)
@@ -266,7 +333,7 @@ export default function Home() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="app-title">源清 YuanQing</div>
+        <div className="app-title-container"><div className="app-title">源清 YuanQing</div><div className="app-version">v1.5</div></div>
         <div className="app-header-right">
           <button
             className="theme-toggle"
@@ -316,6 +383,8 @@ export default function Home() {
               selectedFolderId={selectedFolderId}
               onSelectFolder={selectFolder}
               onCreateFolder={createFolder}
+              onUpdateFolder={updateFolder}
+              onDeleteFolder={deleteFolder}
             />
           )}
         </aside>
@@ -341,6 +410,8 @@ export default function Home() {
               onSelectNote={selectNote}
               onCreateNote={handleCreateNote}
               onDeleteNote={deleteNote}
+              onUpdateNote={updateNote}
+              folders={folders}
             />
           )}
         </section>

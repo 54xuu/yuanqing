@@ -76,9 +76,9 @@ async function main(): Promise<void> {
     const toolNames = toolsResp.tools.map((t) => t.name).sort();
     console.log('  tools:', toolNames.join(', '));
     assert(
-      'listTools returns 3 tools',
-      toolNames.length === 3 &&
-        ['get_note', 'search_notes', 'upsert_note'].every((n) => toolNames.includes(n)),
+      'listTools returns 4 tools',
+      toolNames.length === 4 &&
+        ['get_note', 'get_note_by_path', 'search_notes', 'upsert_note'].every((n) => toolNames.includes(n)),
       `got [${toolNames.join(', ')}]`
     );
 
@@ -223,6 +223,74 @@ async function main(): Promise<void> {
       'upsert_note flags empty path',
       emptyResp.isError === true && !!emptyData?.error,
       `isError=${emptyResp.isError}`
+    );
+
+    // 11) get_note_by_path -> hit the nested note created in Step 7
+    console.log('\n=== Step 11: get_note_by_path (hit nested note) ===');
+    const byPathResp = await client.callTool({
+      name: 'get_note_by_path',
+      arguments: { path: `${folderName}/${nestedTitle}` },
+    });
+    const byPathData = jsonOf(byPathResp);
+    const byPathOk =
+      !!byPathData &&
+      'note' in byPathData &&
+      byPathData.note?.title === nestedTitle &&
+      byPathData.note?.content === 'nested content';
+    assert('get_note_by_path returns the nested note', byPathOk, `title="${byPathData?.note?.title}"`);
+
+    // 12) get_note_by_path -> 3-level nested path
+    console.log('\n=== Step 12: get_note_by_path (3-level deep) ===');
+    const deepFolderA = `DeepA ${Date.now()}`;
+    const deepFolderB = `DeepB ${Date.now()}`;
+    const deepTitle = `DeepNote ${Date.now()}`;
+    const deepPath = `${deepFolderA}/${deepFolderB}/${deepTitle}`;
+    const deepCreateResp = await client.callTool({
+      name: 'upsert_note',
+      arguments: { path: deepPath, content: 'deep content' },
+    });
+    const deepCreateData = jsonOf(deepCreateResp);
+    assert(
+      'upsert_note creates 3-level deep note',
+      deepCreateData?.action === 'created' && deepCreateData?.note?.title === deepTitle,
+      `action=${deepCreateData?.action}`
+    );
+    const deepGetResp = await client.callTool({
+      name: 'get_note_by_path',
+      arguments: { path: deepPath },
+    });
+    const deepGetData = jsonOf(deepGetResp);
+    const deepGetOk =
+      !!deepGetData &&
+      'note' in deepGetData &&
+      deepGetData.note?.title === deepTitle &&
+      deepGetData.note?.content === 'deep content';
+    assert('get_note_by_path resolves 3-level path', deepGetOk, `title="${deepGetData?.note?.title}"`);
+
+    // 13) get_note_by_path -> not found
+    console.log('\n=== Step 13: get_note_by_path (not found) ===');
+    const missingResp = await client.callTool({
+      name: 'get_note_by_path',
+      arguments: { path: '不存在的文件夹/笔记' },
+    });
+    const missingData = jsonOf(missingResp);
+    assert(
+      'get_note_by_path flags missing path',
+      missingResp.isError === true && missingData?.error === 'note not found',
+      `isError=${missingResp.isError}`
+    );
+
+    // 14) get_note_by_path -> empty path
+    console.log('\n=== Step 14: get_note_by_path (empty path) ===');
+    const emptyPathResp = await client.callTool({
+      name: 'get_note_by_path',
+      arguments: { path: '   ' },
+    });
+    const emptyPathData = jsonOf(emptyPathResp);
+    assert(
+      'get_note_by_path flags empty path',
+      emptyPathResp.isError === true && !!emptyPathData?.error,
+      `isError=${emptyPathResp.isError}`
     );
   } catch (err) {
     exitCode = 1;
