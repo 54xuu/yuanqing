@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 
 export interface Folder {
   id: string;
@@ -20,6 +20,11 @@ interface FolderTreeProps {
     data: { name: string; parent_id: string | null; sort_order: number }
   ) => void;
   onDeleteFolder: (id: string) => void;
+}
+
+function isFolderExpanded(folderId: string | null, expanded: Set<string>): boolean {
+  if (folderId === null) return true;
+  return expanded.has(folderId);
 }
 
 function getDescendantIds(folderId: string, folders: Folder[]): Set<string> {
@@ -140,6 +145,20 @@ export default function FolderTree({
   onUpdateFolder,
   onDeleteFolder,
 }: FolderTreeProps) {
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = useCallback((folderId: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folderId)) {
+        next.delete(folderId);
+      } else {
+        next.add(folderId);
+      }
+      return next;
+    });
+  }, []);
+
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newParentId, setNewParentId] = useState<string | null>(null);
@@ -169,6 +188,7 @@ export default function FolderTree({
     const children = (childrenByParent.get(folder.id) ?? []).slice().sort((a, b) => a.sort_order - b.sort_order);
     const isSelected = selectedFolderId === folder.id;
     const isEditing = editingId === folder.id;
+    const isExpanded = isFolderExpanded(folder.id, expandedFolders);
     return (
       <div key={folder.id}>
         <div
@@ -176,6 +196,18 @@ export default function FolderTree({
           style={{ paddingLeft: 12 + depth * 16 }}
           onClick={() => onSelectFolder(folder.id)}
         >
+          {children.length > 0 ? (
+            <button
+              className="folder-expand-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpanded(folder.id);
+              }}
+            >
+              {isExpanded ? "∨" : ">"}</button>
+          ) : (
+            <span className="folder-expand-placeholder" />
+          )}
           <span className="folder-icon">📁</span>
           <span className="folder-name">{folder.name}</span>
           <button
@@ -191,7 +223,7 @@ export default function FolderTree({
             编辑
           </button>
         </div>
-        {children.map((child) => renderFolder(child, depth + 1))}
+        {isExpanded && children.map((child) => renderFolder(child, depth + 1))}
         {isEditing && (
           <div className="modal-overlay" onClick={() => setEditingId(null)}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>

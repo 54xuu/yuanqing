@@ -81,6 +81,31 @@ input::placeholder, textarea::placeholder { color: var(--color-text-placeholder)
 .folder-row:hover { background: var(--color-bg-hover); }
 .folder-row.selected { background: var(--color-bg-selected); color: var(--color-text-selected); }
 .folder-icon { font-size: 14px; }
+.folder-expand-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  margin-right: 4px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.folder-expand-btn:hover {
+  color: var(--color-text-secondary);
+}
+.folder-expand-placeholder {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
 .folder-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-create-form { padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .folder-create-input { height: 28px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13px; outline: none; background: var(--color-bg-input); color: var(--color-text-main); }
@@ -460,4 +485,50 @@ input::placeholder, textarea::placeholder { color: var(--color-text-placeholder)
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
+}
+
+/* ---------- Editor Loading & Large Content ---------- */
+.editor-loading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.large-content-warning {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-left: auto;
+  padding: 2px 8px;
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.preview-truncated-notice {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: var(--color-bg-hover);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-align: center;
 }

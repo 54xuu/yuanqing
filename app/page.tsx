@@ -30,6 +30,7 @@ export default function Home() {
   const [searchInput, setSearchInput] = useState("");
   const [loadingFolders, setLoadingFolders] = useState(true);
   const [loadingNotes, setLoadingNotes] = useState(true);
+  const [loadingNote, setLoadingNote] = useState(false);
   const [foldersError, setFoldersError] = useState<string | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -126,6 +127,7 @@ export default function Home() {
 
   const selectNote = useCallback(async (id: string) => {
     setSelectedNoteId(id);
+    setLoadingNote(true);
     try {
       const res = await fetch(`/api/notes/${id}`);
       if (!res.ok) throw new Error("failed to load note");
@@ -134,6 +136,8 @@ export default function Home() {
     } catch (err) {
       console.error(err);
       setSelectedNote(null);
+    } finally {
+      setLoadingNote(false);
     }
   }, []);
 
@@ -333,7 +337,7 @@ export default function Home() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="app-title-container"><div className="app-title">源清 YuanQing</div><div className="app-version">v1.5</div></div>
+        <div className="app-title-container"><div className="app-title">源清 YuanQing</div><div className="app-version">v1.6</div></div>
         <div className="app-header-right">
           <button
             className="theme-toggle"
@@ -417,7 +421,7 @@ export default function Home() {
         </section>
 
         <main className="pane pane-right">
-          <NoteEditor note={selectedNote} onSave={saveNote} />
+          <NoteEditor note={selectedNote} loading={loadingNote} onSave={saveNote} />
         </main>
       </div>
     </div>

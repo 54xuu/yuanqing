@@ -1,28 +1,43 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Note } from "./NoteList";
 
 interface NoteEditorProps {
   note: Note | null;
+  loading?: boolean;
   onSave: (id: string, data: { title: string; content: string }) => void;
 }
 
-export default function NoteEditor({ note, onSave }: NoteEditorProps) {
+const LARGE_CONTENT_THRESHOLD = 50000;
+const PREVIEW_MAX_CHARS = 50000;
+
+export default function NoteEditor({ note, loading, onSave }: NoteEditorProps) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [preview, setPreview] = useState(true);
+  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     if (note) {
       setTitle(note.title);
       setContent(note.content);
-      setPreview(true);
+      setPreview(note.content.length <= LARGE_CONTENT_THRESHOLD);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.id]);
+
+  if (loading) {
+    return (
+      <div className="note-editor">
+        <div className="editor-loading">
+          <div className="loading-spinner" />
+          <span>加载笔记中...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!note) {
     return (
@@ -32,10 +47,28 @@ export default function NoteEditor({ note, onSave }: NoteEditorProps) {
     );
   }
 
+  const isLargeContent = content.length > LARGE_CONTENT_THRESHOLD;
+  const previewContent = isLargeContent && preview
+    ? content.slice(0, PREVIEW_MAX_CHARS)
+    : content;
+  const truncatedChars = isLargeContent && preview
+    ? content.length - PREVIEW_MAX_CHARS
+    : 0;
+
+  const handleTogglePreview = () => {
+    if (!preview) {
+      startTransition(() => {
+        setPreview(true);
+      });
+    } else {
+      setPreview(false);
+    }
+  };
+
   return (
     <div className="note-editor">
       <div className="editor-toolbar">
-        <button className="small-btn" onClick={() => setPreview((p) => !p)}>
+        <button className="small-btn" onClick={handleTogglePreview}>
           {preview ? "编辑" : "预览"}
         </button>
         <button
@@ -44,6 +77,11 @@ export default function NoteEditor({ note, onSave }: NoteEditorProps) {
         >
           保存
         </button>
+        {isLargeContent && (
+          <span className="large-content-warning">
+            内容较长（{content.length.toLocaleString()} 字符）
+          </span>
+        )}
       </div>
       <input
         className="editor-title"
@@ -53,9 +91,24 @@ export default function NoteEditor({ note, onSave }: NoteEditorProps) {
         onChange={(e) => setTitle(e.target.value)}
       />
       {preview ? (
-        <div className="markdown-preview">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-        </div>
+        <>
+          {isPending && (
+            <div className="editor-loading">
+              <div className="loading-spinner" />
+              <span>渲染预览中...</span>
+            </div>
+          )}
+          <div className="markdown-preview">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewContent}</ReactMarkdown>
+            {truncatedChars > 0 && (
+              <div className="preview-truncated-notice">
+                内容过长，仅显示前 {PREVIEW_MAX_CHARS.toLocaleString()} 字符，
+                还有 {truncatedChars.toLocaleString()} 字符未显示。
+                请切换到编辑模式查看完整内容。
+              </div>
+            )}
+          </div>
+        </>
       ) : (
         <textarea
           className="editor-content"
@@ -66,6 +119,8 @@ export default function NoteEditor({ note, onSave }: NoteEditorProps) {
       )}
       <div className="editor-meta">
         更新于: {new Date(note.updated_at).toLocaleString("zh-CN")}
+        {" | "}
+        字符数: {content.length.toLocaleString()}
       </div>
     </div>
   );
