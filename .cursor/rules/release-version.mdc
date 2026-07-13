@@ -1,0 +1,22 @@
+---
+description: 打 Docker/SWR tag 前必须同步 UI 版本号（来自 package.json）
+alwaysApply: true
+---
+
+# 发布前版本号同步（yuanqing）
+
+打镜像 tag / 推 SWR / 升级 Sealos **之前**，必须先改版本，再构建。
+
+## 唯一真源
+
+- [`package.json`](package.json) 的 `"version"` 字段（如 `"1.8"`）
+- UI logo 旁版本号读自 [`lib/version.ts`](lib/version.ts) → `APP_VERSION_LABEL`（自动变成 `v1.8`）
+- 首页 [`app/page.tsx`](app/page.tsx) 与登录页 [`app/login/page.tsx`](app/login/page.tsx) **禁止再写死** `v1.x`
+
+## 发布清单（每次打 tag 前）
+
+1. 把 `package.json` 的 `version` 改成目标版本（与即将推送的 tag 一致，如 `1.8` → 镜像 `v1.8`）
+2. 确认 UI 会显示 `v{version}`（无需改 TSX，只要改 package.json）
+3. 再执行 `DOCKER_BUILDKIT=0 docker build -t yuanqing:vX.Y .` 并推 SWR / 升 Sealos
+
+漏改 package.json 会导致云端功能已升级但 logo 仍显示旧版本。

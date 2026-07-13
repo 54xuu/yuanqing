@@ -2,6 +2,7 @@
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { APP_VERSION_LABEL } from "@/lib/version";
 
 type PublicUser = {
   id: string;
@@ -49,7 +50,7 @@ function LoginForm() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={onSubmit}>
-        <div className="auth-title-container"><div className="auth-title">源清 YuanQing 登录</div><div className="auth-version">v1.6</div></div>
+        <div className="auth-title-container"><div className="auth-title">源清 YuanQing 登录</div><div className="auth-version">{APP_VERSION_LABEL}</div></div>
         <div className="auth-form">
           <div className="auth-field">
             <label className="auth-label" htmlFor="username">

@@ -76,9 +76,16 @@ async function main(): Promise<void> {
     const toolNames = toolsResp.tools.map((t) => t.name).sort();
     console.log('  tools:', toolNames.join(', '));
     assert(
-      'listTools returns 4 tools',
-      toolNames.length === 4 &&
-        ['get_note', 'get_note_by_path', 'search_notes', 'upsert_note'].every((n) => toolNames.includes(n)),
+      'listTools returns 6 tools',
+      toolNames.length === 6 &&
+        [
+          'get_note',
+          'get_note_by_path',
+          'recall_memory',
+          'save_memory',
+          'search_notes',
+          'upsert_note',
+        ].every((n) => toolNames.includes(n)),
       `got [${toolNames.join(', ')}]`
     );
 
@@ -291,6 +298,105 @@ async function main(): Promise<void> {
       'get_note_by_path flags empty path',
       emptyPathResp.isError === true && !!emptyPathData?.error,
       `isError=${emptyPathResp.isError}`
+    );
+
+    // 15) save_memory + recall_memory round-trip
+    console.log('\n=== Step 15: save_memory / recall_memory ===');
+    const memToken = `clientmem${Date.now()}`;
+    const saveGlobalResp = await client.callTool({
+      name: 'save_memory',
+      arguments: {
+        scope: 'global',
+        title: `ClientGlobal ${Date.now()}`,
+        content: `# global\n${memToken}`,
+        source_app: 'cursor',
+      },
+    });
+    const saveGlobalData = jsonOf(saveGlobalResp);
+    assert(
+      'save_memory creates global memory',
+      saveGlobalData?.action === 'created' && saveGlobalData?.note?.mem_scope === 'global',
+      `action=${saveGlobalData?.action}`
+    );
+
+    const saveToolResp = await client.callTool({
+      name: 'save_memory',
+      arguments: {
+        scope: 'tool',
+        tool: 'trae',
+        title: `ClientTool ${Date.now()}`,
+        content: `# trae tool\n${memToken}`,
+        source_app: 'trae',
+      },
+    });
+    const saveToolData = jsonOf(saveToolResp);
+    assert(
+      'save_memory creates tool memory',
+      saveToolData?.action === 'created' && saveToolData?.note?.mem_tool === 'trae',
+      `action=${saveToolData?.action}`
+    );
+
+    const saveProjectResp = await client.callTool({
+      name: 'save_memory',
+      arguments: {
+        scope: 'project',
+        project: 'yuanqing',
+        title: `ClientProject ${Date.now()}`,
+        content: `# project\n${memToken}`,
+        source_app: 'cursor',
+      },
+    });
+    const saveProjectData = jsonOf(saveProjectResp);
+    assert(
+      'save_memory creates project memory',
+      saveProjectData?.action === 'created' &&
+        saveProjectData?.note?.mem_project === 'yuanqing',
+      `action=${saveProjectData?.action}`
+    );
+
+    const recallCursorResp = await client.callTool({
+      name: 'recall_memory',
+      arguments: { tool: 'cursor', project: 'yuanqing', query: memToken },
+    });
+    const recallCursorData = jsonOf(recallCursorResp);
+    const cursorOk =
+      !!recallCursorData &&
+      recallCursorData.global?.length >= 1 &&
+      recallCursorData.project?.length >= 1 &&
+      (recallCursorData.tool?.length ?? 0) === 0;
+    assert(
+      'recall_memory for cursor excludes trae tool memories',
+      cursorOk,
+      `g=${recallCursorData?.global?.length} t=${recallCursorData?.tool?.length} p=${recallCursorData?.project?.length}`
+    );
+
+    const recallTraeResp = await client.callTool({
+      name: 'recall_memory',
+      arguments: { tool: 'trae', project: 'yuanqing', query: memToken },
+    });
+    const recallTraeData = jsonOf(recallTraeResp);
+    const traeOk =
+      !!recallTraeData &&
+      recallTraeData.global?.length >= 1 &&
+      recallTraeData.tool?.length >= 1 &&
+      recallTraeData.project?.length >= 1;
+    assert(
+      'recall_memory for trae includes all three layers',
+      traeOk,
+      `g=${recallTraeData?.global?.length} t=${recallTraeData?.tool?.length} p=${recallTraeData?.project?.length}`
+    );
+
+    // 16) save_memory validation error
+    console.log('\n=== Step 16: save_memory (missing tool) ===');
+    const badSaveResp = await client.callTool({
+      name: 'save_memory',
+      arguments: { scope: 'tool', title: 'x', content: 'y' },
+    });
+    const badSaveData = jsonOf(badSaveResp);
+    assert(
+      'save_memory flags missing tool',
+      badSaveResp.isError === true && !!badSaveData?.error,
+      `isError=${badSaveResp.isError}`
     );
   } catch (err) {
     exitCode = 1;

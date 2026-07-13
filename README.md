@@ -18,7 +18,7 @@
 
 - 用 **SQLite + FTS5** 提供毫秒级全文检索
 - 用 **Folder / Note** 结构化组织个人上下文
-- 暴露 MCP 工具 `search_notes(query)`、`get_note(id)` 与 `upsert_note(path, content)`，Agent 可按需检索、读取，也可直接写回笔记
+- 暴露 MCP 工具 `search_notes` / `get_note` / `upsert_note` / `get_note_by_path`，以及跨应用记忆工具 `recall_memory` / `save_memory`，Agent 可按需检索、读取，也可按「全局/工具/项目」三层写回共享记忆
 
 ## 使用场景（路演闭环）
 
@@ -84,6 +84,8 @@ Note
   - content: string (markdown)
   - created_at: datetime
   - updated_at: datetime
+  - mem_scope: 'global' | 'tool' | 'project' | null   # 跨应用记忆层；null=普通笔记
+  - mem_tool / mem_project / source_app / mem_tags    # 记忆元数据（可空）
 
 Note_fts (FTS5 虚拟表)
   - note_id: string (UNINDEXED)
@@ -178,10 +180,13 @@ npm run mcp        # 等价于 tsx mcp-server/index.ts，以 stdio 方式运行
 | 工具 | 入参 | 返回 |
 | --- | --- | --- |
 | `search_notes` | `query: string`（关键词） | `{ count, results: [{ id, title, summary }] }` |
-| `get_note` | `id: string`（笔记 uuid） | `{ note: { id, folder_id, title, content, created_at, updated_at } }`；未找到时返回 `{ error, id }` |
+| `get_note` | `id: string`（笔记 uuid） | `{ note: { id, folder_id, title, content, created_at, updated_at, ... } }`；未找到时返回 `{ error, id }` |
 | `upsert_note` | `path: string`（如 `目录A/笔记B`，最后一段为笔记标题，前面段为文件夹层级，不存在则自动创建）、`content: string`（新完整 Markdown 内容） | `{ action: "created" \| "updated", note }`；路径非法时返回 `{ error, path }`。同名同目录笔记存在则覆盖内容，不存在则新增 |
+| `get_note_by_path` | `path: string` | `{ note }` 或 `{ error, path }` |
+| `recall_memory` | `tool?: string`、`project?: string`、`query?: string` | `{ global, tool, project, count }`：返回 `global ∪ 本工具 ∪ 本项目` 的记忆包；可选关键词过滤 |
+| `save_memory` | `scope: global\|tool\|project`、`title`、`content`，以及按需的 `tool` / `project` / `source_app` / `tags` | `{ action: "created" \| "updated", note }`；缺必填作用域字段时返回 `{ error }` |
 
-> `upsert_note` 是写操作：Agent 不仅能检索/读取你的知识，还能在对话中把新产生的结论、会议纪要、待办等直接写回知识库（按 `目录/笔记` 路径自动建文件夹与笔记）。
+> `upsert_note` 写普通笔记；**跨 Cursor / Trae 共享的持久记忆请用 `save_memory`**（带三层作用域元数据），会话开始用 `recall_memory` 召回。
 
 ### 两种传输模式
 
@@ -208,7 +213,7 @@ npm run mcp        # 等价于 tsx mcp-server/index.ts，以 stdio 方式运行
 }
 ```
 
-配置完成后，在对话中提问，Agent 会自动调用 `search_notes` 获取候选笔记摘要，再调用 `get_note` 读取完整 Markdown，从而在对话中引用你的知识；需要记录新内容时调用 `upsert_note` 写回。
+配置完成后，在对话中提问，Agent 会自动调用 `search_notes` / `recall_memory` 获取上下文，再按需 `get_note` 读全文；需要沉淀偏好或踩坑时调用 `save_memory`（跨应用共享）或 `upsert_note`（普通笔记）写回。
 
 ## 部署到服务器后的 Agent 配置
 
@@ -289,7 +294,7 @@ Agent 调用 `/api/mcp` 需要一个有效的 API Key。两种获取方式：
 
 ### 5. 端到端验证（MCP 客户端测试）
 
-项目自带一个端到端 MCP 客户端测试脚本，会真的拉起 `mcp-server/index.ts` 并通过 MCP 协议逐一验证 3 个工具（`search_notes` / `get_note` / `upsert_note`，含创建、更新、嵌套路径、错误分支）：
+项目自带一个端到端 MCP 客户端测试脚本，会真的拉起 `mcp-server/index.ts` 并通过 MCP 协议逐一验证全部工具（含 `recall_memory` / `save_memory` 作用域往返、嵌套路径、错误分支）：
 
 ```bash
 npm run test:mcp-client      # 等价于 tsx tests/mcp-client.ts

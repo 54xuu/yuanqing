@@ -11,8 +11,13 @@ import {
   createNote,
   updateNote,
   getNoteByPath,
+  upsertMemory,
+  recallMemory,
   type Note,
   type NoteSummary,
+  type MemScope,
+  type UpsertMemoryResult,
+  type RecallMemoryResult,
 } from '../lib/db';
 
 // ---------- Tool handler logic (testable, raw JS objects) ----------
@@ -115,6 +120,39 @@ export async function handleGetNoteByPath({
   return { note };
 }
 
+export type SaveMemoryResult = UpsertMemoryResult;
+
+/**
+ * Persist a memory note with scope metadata so other agents can recall it.
+ * Scope guide:
+ * - global: preferences unrelated to any tool/project (language, coding style)
+ * - tool: quirks of a specific agent app (cursor / trae)
+ * - project: conventions unique to one repository
+ */
+export async function handleSaveMemory(input: {
+  scope: MemScope;
+  tool?: string;
+  project?: string;
+  title: string;
+  content: string;
+  source_app?: string;
+  tags?: string[];
+}): Promise<SaveMemoryResult> {
+  return upsertMemory(input);
+}
+
+/**
+ * Recall the memory pack for the current client context:
+ * global ∪ tool-scoped ∪ project-scoped. Call at session start / task switch.
+ */
+export async function handleRecallMemory(input: {
+  tool?: string;
+  project?: string;
+  query?: string;
+}): Promise<RecallMemoryResult> {
+  return recallMemory(input);
+}
+
 // ---------- MCP tool registrations (wrap handlers in MCP envelope) ----------
 
 function registerTools(server: McpServer): void {
@@ -196,6 +234,87 @@ function registerTools(server: McpServer): void {
     },
     async ({ path }) => {
       const data = await handleGetNoteByPath({ path });
+      const isError = 'error' in data;
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+        ...(isError ? { isError: true } : {}),
+      };
+    }
+  );
+
+  // Tool: recall_memory
+  server.tool(
+    'recall_memory',
+    'Recall shared cross-app memories for the current context. Returns a pack grouped as { global, tool, project, count }. Call at session start or when switching tasks. Pass tool (e.g. "cursor"/"trae") and project (repo name) so the server returns global ∪ matching tool memories ∪ matching project memories. Optional query further filters by keyword.',
+    {
+      tool: z
+        .string()
+        .optional()
+        .describe('Current agent app name, e.g. "cursor" or "trae".'),
+      project: z
+        .string()
+        .optional()
+        .describe('Current repository / project name, e.g. "yuanqing".'),
+      query: z
+        .string()
+        .optional()
+        .describe('Optional keyword filter applied within the scoped memories.'),
+    },
+    async ({ tool, project, query }) => {
+      const data = await handleRecallMemory({ tool, project, query });
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // Tool: save_memory
+  server.tool(
+    'save_memory',
+    'Persist a memory to the shared cloud knowledge base so other agents (Cursor/Trae/etc.) can recall it. Scope guide: use "global" for preferences unrelated to any tool/project (output language, coding norms); use "tool" for quirks of a specific agent app (requires tool=cursor|trae); use "project" for conventions unique to one repository (requires project=<repo>). Same title under the same scope upserts (overwrites) the existing memory.',
+    {
+      scope: z
+        .enum(['global', 'tool', 'project'])
+        .describe('Memory layer: global | tool | project.'),
+      tool: z
+        .string()
+        .optional()
+        .describe('Required when scope="tool". e.g. "cursor" or "trae".'),
+      project: z
+        .string()
+        .optional()
+        .describe('Required when scope="project". e.g. "yuanqing".'),
+      title: z.string().describe('Short memory title (also used as the note title).'),
+      content: z.string().describe('Full Markdown content of the memory.'),
+      source_app: z
+        .string()
+        .optional()
+        .describe('Which app is writing this memory, e.g. "cursor" or "trae".'),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe('Optional list of tags for later filtering.'),
+    },
+    async ({ scope, tool, project, title, content, source_app, tags }) => {
+      const data = await handleSaveMemory({
+        scope,
+        tool,
+        project,
+        title,
+        content,
+        source_app,
+        tags,
+      });
       const isError = 'error' in data;
       return {
         content: [

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { APP_VERSION_LABEL } from "@/lib/version";
 import FolderTree from "./components/FolderTree";
 import NoteList from "./components/NoteList";
 import NoteEditor from "./components/NoteEditor";
@@ -337,7 +338,7 @@ export default function Home() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="app-title-container"><div className="app-title">源清 YuanQing</div><div className="app-version">v1.6</div></div>
+        <div className="app-title-container"><div className="app-title">源清 YuanQing</div><div className="app-version">{APP_VERSION_LABEL}</div></div>
         <div className="app-header-right">
           <button
             className="theme-toggle"

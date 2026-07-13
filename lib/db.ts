@@ -11,6 +11,8 @@ export interface Folder {
   sort_order: number;
 }
 
+export type MemScope = 'global' | 'tool' | 'project';
+
 export interface Note {
   id: string;
   folder_id: string | null;
@@ -19,6 +21,16 @@ export interface Note {
   created_at: string;
   updated_at: string;
   sort_order: number;
+  /** Memory scope: 'global' | 'tool' | 'project' | null (plain note). */
+  mem_scope: MemScope | null;
+  /** Tool name when mem_scope='tool' (e.g. 'cursor' | 'trae'). */
+  mem_tool: string | null;
+  /** Project name when mem_scope='project'. */
+  mem_project: string | null;
+  /** Which app wrote this memory (e.g. 'cursor' | 'trae'). */
+  source_app: string | null;
+  /** JSON array of tags, or null. */
+  mem_tags: string | null;
 }
 
 export interface NoteSummary {
@@ -116,6 +128,12 @@ function initSchema(db: DB): void {
 
   ensureColumn(db, 'Folder', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'Note', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0');
+  // Cross-app memory metadata (null = plain note, not part of memory recall).
+  ensureColumn(db, 'Note', 'mem_scope', 'mem_scope TEXT');
+  ensureColumn(db, 'Note', 'mem_tool', 'mem_tool TEXT');
+  ensureColumn(db, 'Note', 'mem_project', 'mem_project TEXT');
+  ensureColumn(db, 'Note', 'source_app', 'source_app TEXT');
+  ensureColumn(db, 'Note', 'mem_tags', 'mem_tags TEXT');
 }
 
 const INTRO_NOTE_CONTENT = '# 自我介绍\n\n你好，我是张源（Zhang Yuan），一名专注于知识工具与开发者体验的软件工程师。\n\n## 简介\n- 目前主导源清（YuanQing）项目，专注于本地优先的知识管理工具与 AI Agent 集成\n- 5 年全栈开发经验，擅长 TypeScript、Node.js、React 与 SQLite\n- 热衷于把复杂的检索与上下文管理问题，转化为简洁可复用的工程方案\n\n## 技能栈\n- 前端：React 19、Next.js（App Router）、TailwindCSS\n- 后端：Node.js、Next.js API Routes、better-sqlite3\n- AI 集成：MCP（Model Context Protocol）、Prompt 工程、向量检索\n- 工程化：Vitest、GitHub Actions、Docker\n\n## 联系方式\n- Email：zhangyuan@example.com\n- GitHub：github.com/zhangyuan\n\n把这条笔记交给 AI，它就能在对话中准确还原我的身份与背景。\n';
@@ -323,7 +341,20 @@ export function createNote(input: {
     content
   );
 
-  return { id, folder_id, title, content, created_at: now, updated_at: now, sort_order };
+  return {
+    id,
+    folder_id,
+    title,
+    content,
+    created_at: now,
+    updated_at: now,
+    sort_order,
+    mem_scope: null,
+    mem_tool: null,
+    mem_project: null,
+    source_app: null,
+    mem_tags: null,
+  };
 }
 
 export function getNote(id: string): Note | null {
@@ -373,7 +404,7 @@ export function updateNote(id: string, input: NoteUpdateInput): Note | null {
     content
   );
 
-  return { ...existing, title, content, folder_id, sort_order, updated_at };
+  return getNote(id);
 }
 
 export function deleteNote(id: string): boolean {
@@ -417,6 +448,224 @@ export function searchNotes(query: string): NoteSummary[] {
       'SELECT note_id AS id, title, snippet(Note_fts, 2, ?, ?, ?, 24) AS summary FROM Note_fts WHERE Note_fts MATCH ? ORDER BY rank LIMIT 20'
     )
     .all('', '', '...', ftsQuery) as NoteSummary[];
+}
+
+// ---------- Cross-app memory (global / tool / project) ----------
+
+export interface UpsertMemoryInput {
+  scope: MemScope;
+  tool?: string;
+  project?: string;
+  title: string;
+  content: string;
+  source_app?: string;
+  tags?: string[];
+}
+
+export type UpsertMemoryResult =
+  | { action: 'created'; note: Note }
+  | { action: 'updated'; note: Note }
+  | { error: string };
+
+export interface RecallMemoryInput {
+  tool?: string;
+  project?: string;
+  query?: string;
+}
+
+export interface RecallMemoryResult {
+  global: Note[];
+  tool: Note[];
+  project: Note[];
+  count: number;
+}
+
+function normalizeMemoryTitle(title: string): string {
+  return title.trim();
+}
+
+function ensureFolderPath(segments: string[]): string | null {
+  let parentId: string | null = null;
+  for (const seg of segments) {
+    let folder = getFolderByParentAndName(parentId, seg);
+    if (!folder) {
+      folder = createFolder(seg, parentId);
+    }
+    parentId = folder.id;
+  }
+  return parentId;
+}
+
+function memoryFolderSegments(
+  scope: MemScope,
+  tool?: string,
+  project?: string
+): { segments: string[]; error?: string } {
+  if (scope === 'global') {
+    return { segments: ['全局记忆'] };
+  }
+  if (scope === 'tool') {
+    const t = (tool ?? '').trim();
+    if (!t) return { segments: [], error: 'tool is required when scope is "tool"' };
+    return { segments: ['工具记忆', t] };
+  }
+  const p = (project ?? '').trim();
+  if (!p) return { segments: [], error: 'project is required when scope is "project"' };
+  return { segments: ['项目记忆', p] };
+}
+
+function serializeTags(tags?: string[]): string | null {
+  if (!tags || tags.length === 0) return null;
+  return JSON.stringify(tags);
+}
+
+/**
+ * Create or update a memory note under the convention folder tree:
+ * - global  -> 全局记忆/<title>
+ * - tool    -> 工具记忆/<tool>/<title>
+ * - project -> 项目记忆/<project>/<title>
+ */
+export function upsertMemory(input: UpsertMemoryInput): UpsertMemoryResult {
+  const title = normalizeMemoryTitle(input.title);
+  if (!title) return { error: 'title must not be empty' };
+  if (!input.content && input.content !== '') {
+    return { error: 'content is required' };
+  }
+
+  const { segments, error } = memoryFolderSegments(
+    input.scope,
+    input.tool,
+    input.project
+  );
+  if (error) return { error };
+
+  const folderId = ensureFolderPath(segments);
+  const mem_tool = input.scope === 'tool' ? (input.tool ?? '').trim() : null;
+  const mem_project =
+    input.scope === 'project' ? (input.project ?? '').trim() : null;
+  const source_app = (input.source_app ?? '').trim() || null;
+  const mem_tags = serializeTags(input.tags);
+  const now = new Date().toISOString();
+
+  const existing = getNoteByFolderAndTitle(folderId, title);
+  const db = getDb();
+
+  if (existing) {
+    db.prepare(
+      `UPDATE Note SET content = ?, mem_scope = ?, mem_tool = ?, mem_project = ?,
+       source_app = ?, mem_tags = ?, updated_at = ? WHERE id = ?`
+    ).run(
+      input.content,
+      input.scope,
+      mem_tool,
+      mem_project,
+      source_app,
+      mem_tags,
+      now,
+      existing.id
+    );
+    db.prepare('DELETE FROM Note_fts WHERE note_id = ?').run(existing.id);
+    db.prepare('INSERT INTO Note_fts (note_id, title, content) VALUES (?, ?, ?)').run(
+      existing.id,
+      title,
+      input.content
+    );
+    const note = getNote(existing.id);
+    if (!note) return { error: 'failed to update memory' };
+    return { action: 'updated', note };
+  }
+
+  const id = uuidv4();
+  const sort_order = getMaxNoteSortOrder(folderId) + 1;
+  db.prepare(
+    `INSERT INTO Note (
+      id, folder_id, title, content, created_at, updated_at, sort_order,
+      mem_scope, mem_tool, mem_project, source_app, mem_tags
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    folderId,
+    title,
+    input.content,
+    now,
+    now,
+    sort_order,
+    input.scope,
+    mem_tool,
+    mem_project,
+    source_app,
+    mem_tags
+  );
+  db.prepare('INSERT INTO Note_fts (note_id, title, content) VALUES (?, ?, ?)').run(
+    id,
+    title,
+    input.content
+  );
+  const note = getNote(id);
+  if (!note) return { error: 'failed to create memory' };
+  return { action: 'created', note };
+}
+
+/**
+ * Recall memories for the current client context:
+ * global ∪ (tool == tool) ∪ (project == project).
+ * Optional query further filters via FTS5.
+ */
+export function recallMemory(input: RecallMemoryInput): RecallMemoryResult {
+  const db = getDb();
+  const tool = (input.tool ?? '').trim() || null;
+  const project = (input.project ?? '').trim() || null;
+  const ftsQuery = input.query ? toFtsQuery(input.query) : '';
+
+  let rows: Note[];
+  if (ftsQuery) {
+    rows = db
+      .prepare(
+        `SELECT Note.* FROM Note
+         JOIN Note_fts ON Note_fts.note_id = Note.id
+         WHERE Note_fts MATCH ?
+           AND (
+             Note.mem_scope = 'global'
+             OR (Note.mem_scope = 'tool' AND Note.mem_tool = ?)
+             OR (Note.mem_scope = 'project' AND Note.mem_project = ?)
+           )
+         ORDER BY rank
+         LIMIT 50`
+      )
+      .all(ftsQuery, tool, project) as Note[];
+  } else {
+    rows = db
+      .prepare(
+        `SELECT * FROM Note
+         WHERE mem_scope = 'global'
+            OR (mem_scope = 'tool' AND mem_tool = ?)
+            OR (mem_scope = 'project' AND mem_project = ?)
+         ORDER BY
+           CASE mem_scope
+             WHEN 'global' THEN 0
+             WHEN 'tool' THEN 1
+             WHEN 'project' THEN 2
+             ELSE 3
+           END,
+           updated_at DESC
+         LIMIT 100`
+      )
+      .all(tool, project) as Note[];
+  }
+
+  const result: RecallMemoryResult = {
+    global: [],
+    tool: [],
+    project: [],
+    count: 0,
+  };
+  for (const note of rows) {
+    if (note.mem_scope === 'global') result.global.push(note);
+    else if (note.mem_scope === 'tool') result.tool.push(note);
+    else if (note.mem_scope === 'project') result.project.push(note);
+  }
+  result.count = result.global.length + result.tool.length + result.project.length;
+  return result;
 }
 
 function generateApiKeyString(): string {
