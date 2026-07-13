@@ -42,7 +42,7 @@ function truncate(text: string, max: number): string {
   return text.slice(0, max) + "…";
 }
 
-function buildPathLabel(folderId: string, folders: Folder[]): string {
+function buildFolderPath(folderId: string, folders: Folder[]): string {
   const parts: string[] = [];
   let current: string | null = folderId;
   while (current) {
@@ -51,11 +51,11 @@ function buildPathLabel(folderId: string, folders: Folder[]): string {
     parts.unshift(f.name);
     current = f.parent_id;
   }
-  return parts.join(" / ");
+  return parts.join("/");
 }
 
 function getNoteFullPath(note: Note, folders: Folder[]): string {
-  const folderPath = note.folder_id ? buildPathLabel(note.folder_id, folders) : "";
+  const folderPath = note.folder_id ? buildFolderPath(note.folder_id, folders) : "";
   return folderPath ? `${folderPath}/${note.title}` : note.title;
 }
 
