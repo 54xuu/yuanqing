@@ -76,8 +76,8 @@ async function main(): Promise<void> {
     const toolNames = toolsResp.tools.map((t) => t.name).sort();
     console.log('  tools:', toolNames.join(', '));
     assert(
-      'listTools returns 6 tools',
-      toolNames.length === 6 &&
+      'listTools returns note+memory+catalog tools',
+      toolNames.length === 14 &&
         [
           'get_note',
           'get_note_by_path',
@@ -85,6 +85,14 @@ async function main(): Promise<void> {
           'save_memory',
           'search_notes',
           'upsert_note',
+          'list_skills',
+          'upload_skill',
+          'download_skill',
+          'delete_skill',
+          'list_mcp',
+          'upload_mcp',
+          'download_mcp',
+          'delete_mcp',
         ].every((n) => toolNames.includes(n)),
       `got [${toolNames.join(', ')}]`
     );
@@ -398,6 +406,94 @@ async function main(): Promise<void> {
       badSaveResp.isError === true && !!badSaveData?.error,
       `isError=${badSaveResp.isError}`
     );
+
+    // 17) skill catalog roundtrip (stdio → admin user)
+    console.log('\n=== Step 17: upload_skill / download_skill / delete_skill ===');
+    const skillName = `client-skill-${Date.now()}`;
+    const upSkillResp = await client.callTool({
+      name: 'upload_skill',
+      arguments: {
+        name: skillName,
+        description: 'mcp-client test',
+        files: [
+          { path: 'SKILL.md', content: `# ${skillName}\n`, encoding: 'utf8' },
+        ],
+      },
+    });
+    const upSkillData = jsonOf(upSkillResp);
+    assert(
+      'upload_skill creates package',
+      upSkillData?.action === 'created' &&
+        upSkillData?.skill?.name === skillName,
+      `action=${upSkillData?.action}`
+    );
+
+    const dlSkillResp = await client.callTool({
+      name: 'download_skill',
+      arguments: { name: skillName },
+    });
+    const dlSkillData = jsonOf(dlSkillResp);
+    assert(
+      'download_skill returns files',
+      dlSkillData?.skill?.files?.[0]?.content === `# ${skillName}\n`,
+      `files=${dlSkillData?.skill?.files?.length}`
+    );
+
+    const badPathResp = await client.callTool({
+      name: 'upload_skill',
+      arguments: {
+        name: `bad-${Date.now()}`,
+        files: [{ path: '../x.md', content: 'no' }],
+      },
+    });
+    const badPathData = jsonOf(badPathResp);
+    assert(
+      'upload_skill rejects path traversal',
+      badPathResp.isError === true &&
+        typeof badPathData?.error === 'string' &&
+        /unsafe/.test(badPathData.error),
+      `error=${badPathData?.error}`
+    );
+
+    await client.callTool({
+      name: 'delete_skill',
+      arguments: { name: skillName },
+    });
+
+    // 18) mcp catalog + secret scrub
+    console.log('\n=== Step 18: upload_mcp / download_mcp ===');
+    const mcpName = `client-mcp-${Date.now()}`;
+    const upMcpResp = await client.callTool({
+      name: 'upload_mcp',
+      arguments: {
+        name: mcpName,
+        description: 'test',
+        config: {
+          url: 'https://example.com/api/mcp',
+          headers: { 'x-api-key': 'yq_plaintext_secret' },
+        },
+      },
+    });
+    const upMcpData = jsonOf(upMcpResp);
+    assert(
+      'upload_mcp creates config',
+      upMcpData?.action === 'created',
+      `action=${upMcpData?.action}`
+    );
+    const dlMcpResp = await client.callTool({
+      name: 'download_mcp',
+      arguments: { name: mcpName },
+    });
+    const dlMcpData = jsonOf(dlMcpResp);
+    assert(
+      'download_mcp scrubs api key',
+      dlMcpData?.config?.headers?.['x-api-key'] === '${YUANQING_API_KEY}',
+      JSON.stringify(dlMcpData?.config?.headers)
+    );
+    await client.callTool({
+      name: 'delete_mcp',
+      arguments: { name: mcpName },
+    });
   } catch (err) {
     exitCode = 1;
     console.error('\nFATAL: client run threw:', err);

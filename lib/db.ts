@@ -61,6 +61,94 @@ export interface ApiKeyWithUsername extends ApiKey {
   username: string;
 }
 
+export type SkillFileEncoding = 'utf8' | 'base64';
+
+export interface Skill {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  is_deleted: number;
+  deleted_at: string | null;
+}
+
+export interface SkillFile {
+  id: string;
+  skill_id: string;
+  path: string;
+  content: string;
+  encoding: SkillFileEncoding;
+}
+
+export interface SkillWithFiles extends Skill {
+  files: SkillFile[];
+}
+
+export interface SkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  version: number;
+  updated_at: string;
+  file_count: number;
+}
+
+export interface McpConfig {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string;
+  config: string;
+  created_at: string;
+  updated_at: string;
+  is_deleted: number;
+  deleted_at: string | null;
+}
+
+export interface McpConfigSummary {
+  id: string;
+  name: string;
+  description: string;
+  updated_at: string;
+}
+
+/** Resource name: lowercase alphanumerics and hyphens only. */
+export const RESOURCE_NAME_RE = /^[a-z0-9-]+$/;
+
+/**
+ * Validate a relative file path inside a skill package.
+ * Rejects absolute paths, `~`, `..` segments, and backslashes.
+ */
+export function assertSafeSkillFilePath(path: string): string {
+  const trimmed = path.trim().replace(/\\/g, '/');
+  if (!trimmed) {
+    throw new Error('file path must not be empty');
+  }
+  if (trimmed.startsWith('/') || trimmed.startsWith('~')) {
+    throw new Error(`unsafe file path: ${path}`);
+  }
+  const segments = trimmed.split('/');
+  for (const seg of segments) {
+    if (!seg || seg === '.' || seg === '..') {
+      throw new Error(`unsafe file path: ${path}`);
+    }
+  }
+  return trimmed;
+}
+
+export function assertResourceName(name: string): string {
+  const trimmed = name.trim();
+  if (!RESOURCE_NAME_RE.test(trimmed)) {
+    throw new Error(
+      `invalid name "${name}": must match [a-z0-9-] (lowercase alphanumerics and hyphens)`
+    );
+  }
+  return trimmed;
+}
+
 type DB = Database.Database;
 
 const DB_PATH = process.env.YUANQING_DB_PATH || './yuanqing.db';
@@ -124,6 +212,52 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_apikey_user ON ApiKey(user_id);
     CREATE INDEX IF NOT EXISTS idx_apikey_key ON ApiKey(key);
+
+    CREATE TABLE IF NOT EXISTS Skill (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      deleted_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE,
+      UNIQUE (user_id, name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skill_user ON Skill(user_id);
+    CREATE INDEX IF NOT EXISTS idx_skill_user_deleted ON Skill(user_id, is_deleted);
+
+    CREATE TABLE IF NOT EXISTS SkillFile (
+      id TEXT PRIMARY KEY,
+      skill_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      encoding TEXT NOT NULL DEFAULT 'utf8',
+      FOREIGN KEY (skill_id) REFERENCES Skill(id) ON DELETE CASCADE,
+      UNIQUE (skill_id, path)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skillfile_skill ON SkillFile(skill_id);
+
+    CREATE TABLE IF NOT EXISTS McpConfig (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      config TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      deleted_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE,
+      UNIQUE (user_id, name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mcpconfig_user ON McpConfig(user_id);
+    CREATE INDEX IF NOT EXISTS idx_mcpconfig_user_deleted ON McpConfig(user_id, is_deleted);
   `);
 
   ensureColumn(db, 'Folder', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0');
@@ -774,4 +908,333 @@ export function deleteApiKeysByUser(userId: string): number {
   const db = getDb();
   const result = db.prepare('DELETE FROM ApiKey WHERE user_id = ?').run(userId);
   return result.changes;
+}
+
+// ---------- Skill / McpConfig (per-user catalog) ----------
+
+export type SkillFileInput = {
+  path: string;
+  content: string;
+  encoding?: SkillFileEncoding;
+};
+
+export type UpsertSkillResult =
+  | { action: 'created' | 'updated'; skill: SkillWithFiles }
+  | { error: string };
+
+export type DeleteSkillResult =
+  | { action: 'deleted'; name: string }
+  | { error: string };
+
+export type UpsertMcpConfigResult =
+  | { action: 'created' | 'updated'; mcp: McpConfig }
+  | { error: string };
+
+export type DeleteMcpConfigResult =
+  | { action: 'deleted'; name: string }
+  | { error: string };
+
+function getSkillRow(
+  userId: string,
+  name: string,
+  includeDeleted = false
+): Skill | null {
+  const db = getDb();
+  const sql = includeDeleted
+    ? 'SELECT * FROM Skill WHERE user_id = ? AND name = ?'
+    : 'SELECT * FROM Skill WHERE user_id = ? AND name = ? AND is_deleted = 0';
+  const row = db.prepare(sql).get(userId, name) as Skill | undefined;
+  return row ?? null;
+}
+
+function listSkillFiles(skillId: string): SkillFile[] {
+  const db = getDb();
+  return db
+    .prepare(
+      'SELECT * FROM SkillFile WHERE skill_id = ? ORDER BY path ASC'
+    )
+    .all(skillId) as SkillFile[];
+}
+
+export function listSkills(userId: string): SkillSummary[] {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT s.id, s.name, s.description, s.version, s.updated_at,
+              (SELECT COUNT(*) FROM SkillFile f WHERE f.skill_id = s.id) AS file_count
+       FROM Skill s
+       WHERE s.user_id = ? AND s.is_deleted = 0
+       ORDER BY s.name ASC`
+    )
+    .all(userId) as SkillSummary[];
+}
+
+export function getSkillWithFiles(
+  userId: string,
+  name: string
+): SkillWithFiles | null {
+  let safeName: string;
+  try {
+    safeName = assertResourceName(name);
+  } catch {
+    return null;
+  }
+  const skill = getSkillRow(userId, safeName);
+  if (!skill) return null;
+  return { ...skill, files: listSkillFiles(skill.id) };
+}
+
+export function upsertSkill(
+  userId: string,
+  input: {
+    name: string;
+    description?: string;
+    files: SkillFileInput[];
+  }
+): UpsertSkillResult {
+  let safeName: string;
+  try {
+    safeName = assertResourceName(input.name);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  if (!Array.isArray(input.files) || input.files.length === 0) {
+    return { error: 'files must be a non-empty array' };
+  }
+
+  const normalizedFiles: { path: string; content: string; encoding: SkillFileEncoding }[] =
+    [];
+  const seen = new Set<string>();
+  try {
+    for (const f of input.files) {
+      const path = assertSafeSkillFilePath(f.path);
+      if (seen.has(path)) {
+        return { error: `duplicate file path: ${path}` };
+      }
+      seen.add(path);
+      const encoding: SkillFileEncoding =
+        f.encoding === 'base64' ? 'base64' : 'utf8';
+      if (typeof f.content !== 'string') {
+        return { error: `file content must be a string: ${path}` };
+      }
+      normalizedFiles.push({ path, content: f.content, encoding });
+    }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const description = input.description ?? '';
+
+  const existing = getSkillRow(userId, safeName, true);
+  const action: 'created' | 'updated' = existing ? 'updated' : 'created';
+  let skillId = existing?.id ?? uuidv4();
+  const version = existing
+    ? existing.is_deleted
+      ? 1
+      : existing.version + 1
+    : 1;
+  const createdAt =
+    existing && !existing.is_deleted ? existing.created_at : now;
+
+  const tx = db.transaction(() => {
+    if (existing) {
+      skillId = existing.id;
+      db.prepare(
+        `UPDATE Skill SET description = ?, version = ?, updated_at = ?,
+         is_deleted = 0, deleted_at = NULL, created_at = ?
+         WHERE id = ?`
+      ).run(description, version, now, createdAt, skillId);
+      db.prepare('DELETE FROM SkillFile WHERE skill_id = ?').run(skillId);
+    } else {
+      db.prepare(
+        `INSERT INTO Skill (id, user_id, name, description, version, created_at, updated_at, is_deleted, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`
+      ).run(skillId, userId, safeName, description, version, createdAt, now);
+    }
+
+    const insertFile = db.prepare(
+      'INSERT INTO SkillFile (id, skill_id, path, content, encoding) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (const f of normalizedFiles) {
+      insertFile.run(uuidv4(), skillId, f.path, f.content, f.encoding);
+    }
+  });
+  tx();
+
+  const skill = getSkillWithFiles(userId, safeName);
+  if (!skill) {
+    return { error: 'failed to read skill after upsert' };
+  }
+  return { action, skill };
+}
+
+export function deleteSkill(
+  userId: string,
+  name: string
+): DeleteSkillResult {
+  let safeName: string;
+  try {
+    safeName = assertResourceName(name);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+  const existing = getSkillRow(userId, safeName);
+  if (!existing) {
+    return { error: `skill not found: ${safeName}` };
+  }
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(
+    'UPDATE Skill SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?'
+  ).run(now, now, existing.id);
+  return { action: 'deleted', name: safeName };
+}
+
+export function listMcpConfigs(userId: string): McpConfigSummary[] {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT id, name, description, updated_at
+       FROM McpConfig
+       WHERE user_id = ? AND is_deleted = 0
+       ORDER BY name ASC`
+    )
+    .all(userId) as McpConfigSummary[];
+}
+
+export function getMcpConfig(
+  userId: string,
+  name: string
+): McpConfig | null {
+  let safeName: string;
+  try {
+    safeName = assertResourceName(name);
+  } catch {
+    return null;
+  }
+  const db = getDb();
+  const row = db
+    .prepare(
+      'SELECT * FROM McpConfig WHERE user_id = ? AND name = ? AND is_deleted = 0'
+    )
+    .get(userId, safeName) as McpConfig | undefined;
+  return row ?? null;
+}
+
+/**
+ * Replace secret-looking header values with ${YUANQING_API_KEY} placeholders
+ * so plaintext API keys are not stored in the catalog.
+ */
+export function sanitizeMcpConfigJson(config: unknown): string {
+  let obj: Record<string, unknown>;
+  if (typeof config === 'string') {
+    try {
+      obj = JSON.parse(config) as Record<string, unknown>;
+    } catch {
+      throw new Error('config must be valid JSON');
+    }
+  } else if (config && typeof config === 'object' && !Array.isArray(config)) {
+    obj = { ...(config as Record<string, unknown>) };
+  } else {
+    throw new Error('config must be a JSON object');
+  }
+
+  const headers = obj.headers;
+  if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
+    const h = { ...(headers as Record<string, unknown>) };
+    for (const key of Object.keys(h)) {
+      const lower = key.toLowerCase();
+      if (
+        lower === 'x-api-key' ||
+        lower === 'authorization' ||
+        lower.includes('api-key') ||
+        lower.includes('apikey') ||
+        lower.includes('token') ||
+        lower.includes('secret')
+      ) {
+        h[key] = '${YUANQING_API_KEY}';
+      }
+    }
+    obj.headers = h;
+  }
+  return JSON.stringify(obj);
+}
+
+export function upsertMcpConfig(
+  userId: string,
+  input: {
+    name: string;
+    description?: string;
+    config: unknown;
+  }
+): UpsertMcpConfigResult {
+  let safeName: string;
+  try {
+    safeName = assertResourceName(input.name);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  let configJson: string;
+  try {
+    configJson = sanitizeMcpConfigJson(input.config);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const description = input.description ?? '';
+
+  const existing = db
+    .prepare('SELECT * FROM McpConfig WHERE user_id = ? AND name = ?')
+    .get(userId, safeName) as McpConfig | undefined;
+
+  let action: 'created' | 'updated';
+  if (existing) {
+    action = 'updated';
+    const createdAt = existing.is_deleted ? now : existing.created_at;
+    db.prepare(
+      `UPDATE McpConfig SET description = ?, config = ?, updated_at = ?,
+       is_deleted = 0, deleted_at = NULL, created_at = ?
+       WHERE id = ?`
+    ).run(description, configJson, now, createdAt, existing.id);
+  } else {
+    action = 'created';
+    db.prepare(
+      `INSERT INTO McpConfig (id, user_id, name, description, config, created_at, updated_at, is_deleted, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`
+    ).run(uuidv4(), userId, safeName, description, configJson, now, now);
+  }
+
+  const mcp = getMcpConfig(userId, safeName);
+  if (!mcp) {
+    return { error: 'failed to read mcp config after upsert' };
+  }
+  return { action, mcp };
+}
+
+export function deleteMcpConfig(
+  userId: string,
+  name: string
+): DeleteMcpConfigResult {
+  let safeName: string;
+  try {
+    safeName = assertResourceName(name);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+  const existing = getMcpConfig(userId, safeName);
+  if (!existing) {
+    return { error: `mcp config not found: ${safeName}` };
+  }
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(
+    'UPDATE McpConfig SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?'
+  ).run(now, now, existing.id);
+  return { action: 'deleted', name: safeName };
 }

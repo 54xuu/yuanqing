@@ -13,12 +13,31 @@ import {
   getNoteByPath,
   upsertMemory,
   recallMemory,
+  getUserByUsername,
+  listSkills,
+  getSkillWithFiles,
+  upsertSkill,
+  deleteSkill,
+  listMcpConfigs,
+  getMcpConfig,
+  upsertMcpConfig,
+  deleteMcpConfig,
   type Note,
   type NoteSummary,
   type MemScope,
   type UpsertMemoryResult,
   type RecallMemoryResult,
+  type SkillSummary,
+  type SkillWithFiles,
+  type McpConfig,
+  type McpConfigSummary,
+  type SkillFileEncoding,
 } from '../lib/db';
+
+export type McpServerContext = {
+  /** Owning yuanqing user id; required for skill/mcp catalog tools. */
+  userId?: string;
+};
 
 // ---------- Tool handler logic (testable, raw JS objects) ----------
 
@@ -153,9 +172,157 @@ export async function handleRecallMemory(input: {
   return recallMemory(input);
 }
 
+// ---------- Skill / MCP catalog handlers (require userId) ----------
+
+function requireUserId(
+  userId: string | undefined
+): { userId: string } | { error: string } {
+  if (!userId) {
+    return {
+      error:
+        'user context missing: skill/mcp catalog tools require an authenticated API key (HTTP) or admin fallback (stdio)',
+    };
+  }
+  return { userId };
+}
+
+export type ListSkillsResult =
+  | { count: number; skills: SkillSummary[] }
+  | { error: string };
+
+export async function handleListSkills(
+  userId: string | undefined
+): Promise<ListSkillsResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  const skills = listSkills(ctx.userId);
+  return { count: skills.length, skills };
+}
+
+export type DownloadSkillResult =
+  | { skill: SkillWithFiles }
+  | { error: string; name?: string };
+
+export async function handleDownloadSkill(
+  userId: string | undefined,
+  name: string
+): Promise<DownloadSkillResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  const skill = getSkillWithFiles(ctx.userId, name);
+  if (!skill) return { error: 'skill not found', name };
+  return { skill };
+}
+
+export type UploadSkillResult =
+  | { action: 'created' | 'updated'; skill: SkillWithFiles }
+  | { error: string };
+
+export async function handleUploadSkill(
+  userId: string | undefined,
+  input: {
+    name: string;
+    description?: string;
+    files: { path: string; content: string; encoding?: SkillFileEncoding }[];
+  }
+): Promise<UploadSkillResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  return upsertSkill(ctx.userId, input);
+}
+
+export type DeleteSkillToolResult =
+  | { action: 'deleted'; name: string }
+  | { error: string };
+
+export async function handleDeleteSkill(
+  userId: string | undefined,
+  name: string
+): Promise<DeleteSkillToolResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  return deleteSkill(ctx.userId, name);
+}
+
+export type ListMcpResult =
+  | { count: number; mcps: McpConfigSummary[] }
+  | { error: string };
+
+export async function handleListMcp(
+  userId: string | undefined
+): Promise<ListMcpResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  const mcps = listMcpConfigs(ctx.userId);
+  return { count: mcps.length, mcps };
+}
+
+export type DownloadMcpResult =
+  | { mcp: McpConfig; config: Record<string, unknown> }
+  | { error: string; name?: string };
+
+export async function handleDownloadMcp(
+  userId: string | undefined,
+  name: string
+): Promise<DownloadMcpResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  const mcp = getMcpConfig(ctx.userId, name);
+  if (!mcp) return { error: 'mcp config not found', name };
+  let config: Record<string, unknown> = {};
+  try {
+    config = JSON.parse(mcp.config) as Record<string, unknown>;
+  } catch {
+    config = {};
+  }
+  return { mcp, config };
+}
+
+export type UploadMcpResult =
+  | { action: 'created' | 'updated'; mcp: McpConfig }
+  | { error: string };
+
+export async function handleUploadMcp(
+  userId: string | undefined,
+  input: {
+    name: string;
+    description?: string;
+    config: unknown;
+  }
+): Promise<UploadMcpResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  return upsertMcpConfig(ctx.userId, input);
+}
+
+export type DeleteMcpToolResult =
+  | { action: 'deleted'; name: string }
+  | { error: string };
+
+export async function handleDeleteMcp(
+  userId: string | undefined,
+  name: string
+): Promise<DeleteMcpToolResult> {
+  const ctx = requireUserId(userId);
+  if ('error' in ctx) return ctx;
+  return deleteMcpConfig(ctx.userId, name);
+}
+
+function jsonResult(data: unknown, isError = false) {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify(data, null, 2),
+      },
+    ],
+    ...(isError ? { isError: true } : {}),
+  };
+}
+
 // ---------- MCP tool registrations (wrap handlers in MCP envelope) ----------
 
-function registerTools(server: McpServer): void {
+function registerTools(server: McpServer, ctx: McpServerContext): void {
   // Tool: search_notes
   server.tool(
     'search_notes',
@@ -163,14 +330,7 @@ function registerTools(server: McpServer): void {
     { query: z.string().describe('Search keyword(s)') },
     async ({ query }) => {
       const data = await handleSearchNotes({ query });
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-      };
+      return jsonResult(data);
     }
   );
 
@@ -181,16 +341,7 @@ function registerTools(server: McpServer): void {
     { id: z.string().describe('Note id (uuid)') },
     async ({ id }) => {
       const data = await handleGetNote({ id });
-      const isError = 'error' in data;
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-        ...(isError ? { isError: true } : {}),
-      };
+      return jsonResult(data, 'error' in data);
     }
   );
 
@@ -208,16 +359,7 @@ function registerTools(server: McpServer): void {
     },
     async ({ path, content }) => {
       const data = await handleUpsertNote({ path, content });
-      const isError = 'error' in data;
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-        ...(isError ? { isError: true } : {}),
-      };
+      return jsonResult(data, 'error' in data);
     }
   );
 
@@ -234,16 +376,7 @@ function registerTools(server: McpServer): void {
     },
     async ({ path }) => {
       const data = await handleGetNoteByPath({ path });
-      const isError = 'error' in data;
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-        ...(isError ? { isError: true } : {}),
-      };
+      return jsonResult(data, 'error' in data);
     }
   );
 
@@ -267,14 +400,7 @@ function registerTools(server: McpServer): void {
     },
     async ({ tool, project, query }) => {
       const data = await handleRecallMemory({ tool, project, query });
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-      };
+      return jsonResult(data);
     }
   );
 
@@ -315,30 +441,162 @@ function registerTools(server: McpServer): void {
         source_app,
         tags,
       });
-      const isError = 'error' in data;
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(data, null, 2),
-          },
-        ],
-        ...(isError ? { isError: true } : {}),
-      };
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  // ---- Skill catalog ----
+
+  server.tool(
+    'list_skills',
+    'List skills in the current yuanqing account catalog (scoped by API key user). Returns { count, skills: [{ name, description, version, updated_at, file_count }] }.',
+    {},
+    async () => {
+      const data = await handleListSkills(ctx.userId);
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  server.tool(
+    'download_skill',
+    'Download a skill package (multi-file) from the current yuanqing account. Returns { skill: { name, description, version, files: [{ path, content, encoding }] } }. Write files under the target tool skill directory (see yuanqing-download-skill).',
+    {
+      name: z
+        .string()
+        .describe('Skill name, e.g. "yuanqing-recall-memory" (kebab-case).'),
+    },
+    async ({ name }) => {
+      const data = await handleDownloadSkill(ctx.userId, name);
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  server.tool(
+    'upload_skill',
+    'Upload or overwrite a skill package for the current yuanqing account. Pass all files relative to the skill root (e.g. SKILL.md, scripts/foo.sh). encoding defaults to utf8; use base64 for binary. Same name upserts and increments version. Secret headers are not applicable here.',
+    {
+      name: z.string().describe('Skill name matching [a-z0-9-].'),
+      description: z
+        .string()
+        .optional()
+        .describe('Short description (usually from SKILL.md frontmatter).'),
+      files: z
+        .array(
+          z.object({
+            path: z
+              .string()
+              .describe('Relative path inside the skill, e.g. "SKILL.md".'),
+            content: z.string().describe('File content (utf8 text or base64).'),
+            encoding: z
+              .enum(['utf8', 'base64'])
+              .optional()
+              .describe('Content encoding; default utf8.'),
+          })
+        )
+        .describe('All files in the skill directory.'),
+    },
+    async ({ name, description, files }) => {
+      const data = await handleUploadSkill(ctx.userId, {
+        name,
+        description,
+        files,
+      });
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  server.tool(
+    'delete_skill',
+    'Soft-delete a skill from the current yuanqing account catalog.',
+    {
+      name: z.string().describe('Skill name to delete.'),
+    },
+    async ({ name }) => {
+      const data = await handleDeleteSkill(ctx.userId, name);
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  // ---- MCP config catalog ----
+
+  server.tool(
+    'list_mcp',
+    'List MCP server configs stored in the current yuanqing account catalog. Returns { count, mcps: [{ name, description, updated_at }] }.',
+    {},
+    async () => {
+      const data = await handleListMcp(ctx.userId);
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  server.tool(
+    'download_mcp',
+    'Download one MCP server config. Returns { mcp, config } where config is the JSON fragment to merge into mcpServers[name]. Sensitive headers are stored as ${YUANQING_API_KEY} placeholders — replace with the local key when writing.',
+    {
+      name: z.string().describe('MCP server name, e.g. "yuanqing".'),
+    },
+    async ({ name }) => {
+      const data = await handleDownloadMcp(ctx.userId, name);
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  server.tool(
+    'upload_mcp',
+    'Upload or overwrite an MCP server config for the current yuanqing account. config is the JSON object for one server (url/command/headers/env). Values in headers matching api-key/authorization/token/secret are replaced with ${YUANQING_API_KEY} before storage.',
+    {
+      name: z.string().describe('MCP server name matching [a-z0-9-].'),
+      description: z.string().optional().describe('Short description.'),
+      config: z
+        .union([z.record(z.string(), z.unknown()), z.string()])
+        .describe(
+          'MCP server JSON object, or a JSON string. Example: { "url": "https://host/api/mcp", "headers": { "x-api-key": "..." } }.'
+        ),
+    },
+    async ({ name, description, config }) => {
+      const data = await handleUploadMcp(ctx.userId, {
+        name,
+        description,
+        config,
+      });
+      return jsonResult(data, 'error' in data);
+    }
+  );
+
+  server.tool(
+    'delete_mcp',
+    'Soft-delete an MCP config from the current yuanqing account catalog.',
+    {
+      name: z.string().describe('MCP server name to delete.'),
+    },
+    async ({ name }) => {
+      const data = await handleDeleteMcp(ctx.userId, name);
+      return jsonResult(data, 'error' in data);
     }
   );
 }
 
 /**
+ * Resolve userId for stdio local mode: use explicit ctx.userId, else admin.
+ */
+export function resolveMcpUserId(ctx?: McpServerContext): string | undefined {
+  if (ctx?.userId) return ctx.userId;
+  const admin = getUserByUsername('admin');
+  return admin?.id;
+}
+
+/**
  * Build a fresh, configured McpServer instance with tools registered.
  * Used by both the stdio entry and the HTTP (`/api/mcp`) transport.
+ * Pass `{ userId }` from the authenticated API key so catalog tools are scoped.
  */
-export function createMcpServer(): McpServer {
+export function createMcpServer(ctx?: McpServerContext): McpServer {
   const server = new McpServer({
     name: 'yuanqing',
     version: '0.1.0',
   });
-  registerTools(server);
+  const userId = resolveMcpUserId(ctx);
+  registerTools(server, { userId });
   return server;
 }
 

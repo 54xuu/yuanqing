@@ -37,7 +37,7 @@ async function handleMcp(request: Request): Promise<Response> {
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });
-  const server = createMcpServer();
+  const server = createMcpServer({ userId: record.user_id });
   await server.connect(transport);
   return transport.handleRequest(request);
 }
