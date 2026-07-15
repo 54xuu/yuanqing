@@ -22,7 +22,7 @@ description: >-
 |------|----------|
 | Cursor | `.cursor/skills/<name>/SKILL.md` 及同包其它文件 |
 | Trae Work | `.trae/skills/<name>/` |
-| WorkBuddy | `<待补充：WorkBuddy skill 目录>/<name>/` |
+| WorkBuddy | `%userprofile%/.workbuddy/<name>/` |
 
 若当前工具不在表中或路径未知：**先问用户目标目录**，再写入。
 

@@ -41,14 +41,15 @@
 - 或在对话里 `@` 引用本目录下的 `SKILL.md`
 - 记忆规约规则已在 `.cursor/rules/memory.mdc`（alwaysApply）
 
-### Trae
+### Trae Work
 
-- 复制到 `.trae/skills/<name>/SKILL.md`（与现有 `huawei-swr-push` 同级）
-- 记忆规约见 `.trae/rules/memory.md`
+- **Skill**：复制到 `.trae/skills/<name>/SKILL.md`
+- **MCP**：无法自动配置，只能在界面手动添加；用 `yuanqing-download-mcp` 时把 JSON 回复给用户粘贴
 
 ### WorkBuddy
 
-- skill / mcp 路径以各端 skill 内「目标路径」表为准（占位待补充）
+- **Skill**：`%userprofile%/.workbuddy/<name>/`
+- **MCP**：`%userprofile%/.workbuddy/mcp.json`
 
 ### 其它支持 MCP 的应用
 

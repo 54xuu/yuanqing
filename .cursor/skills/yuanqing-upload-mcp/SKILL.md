@@ -17,11 +17,11 @@ description: >-
 
 ## 本地配置读取路径（可配置）
 
-| 工具 | 常见 MCP 配置位置 |
-|------|-------------------|
+| 工具 | 常见 MCP 配置位置 / 行为 |
+|------|---------------------------|
 | Cursor | 项目 `.cursor/mcp.json` 或用户级 `~/.cursor/mcp.json` |
-| Trae Work | `<待确认：Trae MCP 配置路径>` |
-| WorkBuddy | `<待补充：WorkBuddy MCP 配置路径>` |
+| Trae Work | **无法自动读取**；请用户在界面查看或粘贴现有配置 JSON，再从中取出单个 server 上传 |
+| WorkBuddy | `%userprofile%/.workbuddy/mcp.json` |
 
 从本地 `mcpServers` 中取出**某一个** server 条目上传（不要整文件无差别上传密钥明文）。
 

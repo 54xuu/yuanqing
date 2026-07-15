@@ -24,7 +24,7 @@ description: >-
 |------|----------------|
 | Cursor | `.cursor/skills/<name>/`（项目）或用户指定路径 |
 | Trae Work | `.trae/skills/<name>/` |
-| WorkBuddy | `<待补充：WorkBuddy skill 目录>` |
+| WorkBuddy | `%userprofile%/.workbuddy/<name>/` |
 
 ## 怎么调用
 

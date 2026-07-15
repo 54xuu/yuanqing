@@ -18,13 +18,21 @@ description: >-
 
 ## 目标路径（写入侧，可配置）
 
-| 工具 | MCP 配置文件 |
+| 工具 | MCP 配置文件 / 行为 |
 |------|----------------|
 | Cursor | `.cursor/mcp.json`（项目）或 `~/.cursor/mcp.json`（用户级） |
-| Trae Work | `<待确认：Trae MCP 配置路径>` |
-| WorkBuddy | `<待补充：WorkBuddy MCP 配置路径>` |
+| Trae Work | **无法自动写入**；只能在界面手动配置。将合并后的 JSON **回复给用户**粘贴 |
+| WorkBuddy | `%userprofile%/.workbuddy/mcp.json` |
 
-路径未知时先问用户。
+Trae Work 时跳过写文件，直接输出如下结构（`config` 已注入本地 key）：
+
+```json
+{
+  "mcpServers": {
+    "<name>": { "url": "...", "headers": { "x-api-key": "yq_..." } }
+  }
+}
+```
 
 ## 怎么调用
 
@@ -40,7 +48,7 @@ download_mcp({ name: "yuanqing" })
 3. 读取本地 mcp JSON（不存在则创建 `{ "mcpServers": {} }`）。
 4. 将 `config` 合并到 `mcpServers[name]`（保留其它已有 server）。
 5. 把字符串 `${YUANQING_API_KEY}`（以及 headers 里的同名占位）替换为**本机真实 API Key**（可从现有 yuanqing 配置、环境变量或询问用户获取）。**不要把云端占位符原样留给客户端。**
-6. 写回本地文件（保持合法 JSON）。
+6. 写回本地文件（保持合法 JSON）；**Trae Work 改为把第 4–5 步结果以 JSON 回复用户**。
 
 ## 示例
 
