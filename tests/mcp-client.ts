@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     console.log('  tools:', toolNames.join(', '));
     assert(
       'listTools returns note+memory+catalog tools',
-      toolNames.length === 14 &&
+      toolNames.length === 10 &&
         [
           'get_note',
           'get_note_by_path',
@@ -89,10 +89,6 @@ async function main(): Promise<void> {
           'upload_skill',
           'download_skill',
           'delete_skill',
-          'list_mcp',
-          'upload_mcp',
-          'download_mcp',
-          'delete_mcp',
         ].every((n) => toolNames.includes(n)),
       `got [${toolNames.join(', ')}]`
     );
@@ -331,16 +327,16 @@ async function main(): Promise<void> {
       name: 'save_memory',
       arguments: {
         scope: 'tool',
-        tool: 'trae',
+        tool: 'opencode',
         title: `ClientTool ${Date.now()}`,
-        content: `# trae tool\n${memToken}`,
-        source_app: 'trae',
+        content: `# opencode tool\n${memToken}`,
+        source_app: 'opencode',
       },
     });
     const saveToolData = jsonOf(saveToolResp);
     assert(
       'save_memory creates tool memory',
-      saveToolData?.action === 'created' && saveToolData?.note?.mem_tool === 'trae',
+      saveToolData?.action === 'created' && saveToolData?.note?.mem_tool === 'opencode',
       `action=${saveToolData?.action}`
     );
 
@@ -373,25 +369,25 @@ async function main(): Promise<void> {
       recallCursorData.project?.length >= 1 &&
       (recallCursorData.tool?.length ?? 0) === 0;
     assert(
-      'recall_memory for cursor excludes trae tool memories',
+      'recall_memory for cursor excludes opencode tool memories',
       cursorOk,
       `g=${recallCursorData?.global?.length} t=${recallCursorData?.tool?.length} p=${recallCursorData?.project?.length}`
     );
 
-    const recallTraeResp = await client.callTool({
+    const recallOpencodeResp = await client.callTool({
       name: 'recall_memory',
-      arguments: { tool: 'trae', project: 'yuanqing', query: memToken },
+      arguments: { tool: 'opencode', project: 'yuanqing', query: memToken },
     });
-    const recallTraeData = jsonOf(recallTraeResp);
-    const traeOk =
-      !!recallTraeData &&
-      recallTraeData.global?.length >= 1 &&
-      recallTraeData.tool?.length >= 1 &&
-      recallTraeData.project?.length >= 1;
+    const recallOpencodeData = jsonOf(recallOpencodeResp);
+    const opencodeOk =
+      !!recallOpencodeData &&
+      recallOpencodeData.global?.length >= 1 &&
+      recallOpencodeData.tool?.length >= 1 &&
+      recallOpencodeData.project?.length >= 1;
     assert(
-      'recall_memory for trae includes all three layers',
-      traeOk,
-      `g=${recallTraeData?.global?.length} t=${recallTraeData?.tool?.length} p=${recallTraeData?.project?.length}`
+      'recall_memory for opencode includes all three layers',
+      opencodeOk,
+      `g=${recallOpencodeData?.global?.length} t=${recallOpencodeData?.tool?.length} p=${recallOpencodeData?.project?.length}`
     );
 
     // 16) save_memory validation error
@@ -458,41 +454,6 @@ async function main(): Promise<void> {
     await client.callTool({
       name: 'delete_skill',
       arguments: { name: skillName },
-    });
-
-    // 18) mcp catalog + secret scrub
-    console.log('\n=== Step 18: upload_mcp / download_mcp ===');
-    const mcpName = `client-mcp-${Date.now()}`;
-    const upMcpResp = await client.callTool({
-      name: 'upload_mcp',
-      arguments: {
-        name: mcpName,
-        description: 'test',
-        config: {
-          url: 'https://example.com/api/mcp',
-          headers: { 'x-api-key': 'yq_plaintext_secret' },
-        },
-      },
-    });
-    const upMcpData = jsonOf(upMcpResp);
-    assert(
-      'upload_mcp creates config',
-      upMcpData?.action === 'created',
-      `action=${upMcpData?.action}`
-    );
-    const dlMcpResp = await client.callTool({
-      name: 'download_mcp',
-      arguments: { name: mcpName },
-    });
-    const dlMcpData = jsonOf(dlMcpResp);
-    assert(
-      'download_mcp scrubs api key',
-      dlMcpData?.config?.headers?.['x-api-key'] === '${YUANQING_API_KEY}',
-      JSON.stringify(dlMcpData?.config?.headers)
-    );
-    await client.callTool({
-      name: 'delete_mcp',
-      arguments: { name: mcpName },
     });
   } catch (err) {
     exitCode = 1;

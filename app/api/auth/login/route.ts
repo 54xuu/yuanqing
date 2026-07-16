@@ -1,7 +1,11 @@
 import { serverError, badRequest } from '@/lib/apiError';
 import { getUserByUsername } from '@/lib/db';
 import { verifyPassword } from '@/lib/password';
-import { signSession, sessionCookieOptions, SESSION_COOKIE } from '@/lib/session';
+import {
+  signSession,
+  sessionCookieOptions,
+  SESSION_COOKIE,
+} from '@/lib/session';
 import { toPublicUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -65,7 +69,8 @@ export async function POST(request: Request) {
     // 正确密码：直接登录成功，清空速率限制计数器
     if (user && verifyPassword(password, user.password_hash)) {
       clearRateLimit(ip);
-      const token = await signSession(user.id);
+      const sv = user.session_version ?? 0;
+      const token = await signSession(user.id, sv);
       const opts = sessionCookieOptions();
       const cookie = `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=${opts.path}; HttpOnly; SameSite=${opts.sameSite}; Max-Age=${opts.maxAge}${opts.secure ? '; Secure' : ''}`;
       return Response.json(

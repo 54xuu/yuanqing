@@ -23,11 +23,11 @@ export interface Note {
   sort_order: number;
   /** Memory scope: 'global' | 'tool' | 'project' | null (plain note). */
   mem_scope: MemScope | null;
-  /** Tool name when mem_scope='tool' (e.g. 'cursor' | 'trae'). */
+  /** Tool name when mem_scope='tool' (e.g. 'cursor' | 'opencode'). */
   mem_tool: string | null;
   /** Project name when mem_scope='project'. */
   mem_project: string | null;
-  /** Which app wrote this memory (e.g. 'cursor' | 'trae'). */
+  /** Which app wrote this memory (e.g. 'cursor' | 'opencode'). */
   source_app: string | null;
   /** JSON array of tags, or null. */
   mem_tags: string | null;
@@ -47,6 +47,8 @@ export interface User {
   password_hash: string;
   role: UserRole;
   created_at: string;
+  /** Incremented on logout / password change to invalidate all sessions. */
+  session_version: number;
 }
 
 export interface ApiKey {
@@ -268,6 +270,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'Note', 'mem_project', 'mem_project TEXT');
   ensureColumn(db, 'Note', 'source_app', 'source_app TEXT');
   ensureColumn(db, 'Note', 'mem_tags', 'mem_tags TEXT');
+  ensureColumn(db, 'User', 'session_version', 'session_version INTEGER NOT NULL DEFAULT 0');
 }
 
 const INTRO_NOTE_CONTENT = '# 自我介绍\n\n你好，我是张源（Zhang Yuan），一名专注于知识工具与开发者体验的软件工程师。\n\n## 简介\n- 目前主导源清（YuanQing）项目，专注于本地优先的知识管理工具与 AI Agent 集成\n- 5 年全栈开发经验，擅长 TypeScript、Node.js、React 与 SQLite\n- 热衷于把复杂的检索与上下文管理问题，转化为简洁可复用的工程方案\n\n## 技能栈\n- 前端：React 19、Next.js（App Router）、TailwindCSS\n- 后端：Node.js、Next.js API Routes、better-sqlite3\n- AI 集成：MCP（Model Context Protocol）、Prompt 工程、向量检索\n- 工程化：Vitest、GitHub Actions、Docker\n\n## 联系方式\n- Email：zhangyuan@example.com\n- GitHub：github.com/zhangyuan\n\n把这条笔记交给 AI，它就能在对话中准确还原我的身份与背景。\n';
@@ -333,6 +336,7 @@ export function getDb(): DB {
   seedIfEmpty(db);
   seedAdmin(db);
   dbInstance = db;
+  backfillMemoryMetadata();
   return db;
 }
 
@@ -475,20 +479,25 @@ export function createNote(input: {
     content
   );
 
-  return {
-    id,
-    folder_id,
-    title,
-    content,
-    created_at: now,
-    updated_at: now,
-    sort_order,
-    mem_scope: null,
-    mem_tool: null,
-    mem_project: null,
-    source_app: null,
-    mem_tags: null,
-  };
+  applyMemoryMetadataFromFolder(id);
+  const note = getNote(id);
+  if (!note) {
+    return {
+      id,
+      folder_id,
+      title,
+      content,
+      created_at: now,
+      updated_at: now,
+      sort_order,
+      mem_scope: null,
+      mem_tool: null,
+      mem_project: null,
+      source_app: null,
+      mem_tags: null,
+    };
+  }
+  return note;
 }
 
 export function getNote(id: string): Note | null {
@@ -538,6 +547,7 @@ export function updateNote(id: string, input: NoteUpdateInput): Note | null {
     content
   );
 
+  applyMemoryMetadataFromFolder(id);
   return getNote(id);
 }
 
@@ -653,6 +663,129 @@ function serializeTags(tags?: string[]): string | null {
   return JSON.stringify(tags);
 }
 
+const MEMORY_ROOT_GLOBAL = '全局记忆';
+const MEMORY_ROOT_TOOL = '工具记忆';
+const MEMORY_ROOT_PROJECT = '项目记忆';
+
+/** Folder path from root to folder (inclusive). */
+export function getFolderPathFromRoot(folderId: string | null): string[] {
+  if (!folderId) return [];
+  const segments: string[] = [];
+  let currentId: string | null = folderId;
+  while (currentId) {
+    const folder = getFolder(currentId);
+    if (!folder) break;
+    segments.unshift(folder.name);
+    currentId = folder.parent_id;
+  }
+  return segments;
+}
+
+/** Infer memory scope from folder path segments (root → leaf). */
+export function inferMemoryScopeFromFolderPath(segments: string[]): {
+  scope: MemScope | null;
+  tool: string | null;
+  project: string | null;
+} {
+  if (segments.length >= 1 && segments[0] === MEMORY_ROOT_GLOBAL) {
+    return { scope: 'global', tool: null, project: null };
+  }
+  if (segments.length >= 2 && segments[0] === MEMORY_ROOT_TOOL) {
+    return { scope: 'tool', tool: segments[1], project: null };
+  }
+  if (segments.length >= 2 && segments[0] === MEMORY_ROOT_PROJECT) {
+    return { scope: 'project', tool: null, project: segments[1] };
+  }
+  return { scope: null, tool: null, project: null };
+}
+
+/** Effective memory scope: mem_scope column or inferred from folder location. */
+export function getEffectiveMemoryScope(note: Note): {
+  scope: MemScope | null;
+  tool: string | null;
+  project: string | null;
+} {
+  if (note.mem_scope) {
+    return {
+      scope: note.mem_scope,
+      tool: note.mem_tool,
+      project: note.mem_project,
+    };
+  }
+  const path = getFolderPathFromRoot(note.folder_id);
+  return inferMemoryScopeFromFolderPath(path);
+}
+
+function getFolderSubtreeIds(rootFolderId: string): string[] {
+  const all = listFolders();
+  const ids = new Set<string>([rootFolderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const f of all) {
+      if (f.parent_id && ids.has(f.parent_id) && !ids.has(f.id)) {
+        ids.add(f.id);
+        changed = true;
+      }
+    }
+  }
+  return [...ids];
+}
+
+function resolveMemoryRootFolderId(segments: string[]): string | null {
+  let parentId: string | null = null;
+  for (const seg of segments) {
+    const folder = getFolderByParentAndName(parentId, seg);
+    if (!folder) return null;
+    parentId = folder.id;
+  }
+  return parentId;
+}
+
+function getMemorySubtreeFolderIds(
+  scope: MemScope,
+  tool?: string | null,
+  project?: string | null
+): string[] {
+  const { segments } = memoryFolderSegments(
+    scope,
+    tool ?? undefined,
+    project ?? undefined
+  );
+  const rootId = resolveMemoryRootFolderId(segments);
+  if (!rootId) return [];
+  return getFolderSubtreeIds(rootId);
+}
+
+/** Sync mem_scope columns from folder location when note lives under memory dirs. */
+export function applyMemoryMetadataFromFolder(noteId: string): void {
+  const note = getNote(noteId);
+  if (!note) return;
+  const inferred = inferMemoryScopeFromFolderPath(
+    getFolderPathFromRoot(note.folder_id)
+  );
+  const db = getDb();
+  if (inferred.scope) {
+    db.prepare(
+      `UPDATE Note SET mem_scope = ?, mem_tool = ?, mem_project = ? WHERE id = ?`
+    ).run(inferred.scope, inferred.tool, inferred.project, noteId);
+  } else if (note.mem_scope) {
+    db.prepare(
+      `UPDATE Note SET mem_scope = NULL, mem_tool = NULL, mem_project = NULL WHERE id = ?`
+    ).run(noteId);
+  }
+}
+
+/** One-time backfill for notes created manually in memory folders. */
+export function backfillMemoryMetadata(): number {
+  const db = getDb();
+  const notes = db.prepare('SELECT id FROM Note').all() as { id: string }[];
+  for (const { id } of notes) {
+    applyMemoryMetadataFromFolder(id);
+  }
+  return notes.length;
+}
+
 /**
  * Create or update a memory note under the convention folder tree:
  * - global  -> 全局记忆/<title>
@@ -743,13 +876,48 @@ export function upsertMemory(input: UpsertMemoryInput): UpsertMemoryResult {
 /**
  * Recall memories for the current client context:
  * global ∪ (tool == tool) ∪ (project == project).
- * Optional query further filters via FTS5.
+ * Notes under 全局记忆/工具记忆/项目记忆 folders count even if mem_scope was null.
  */
 export function recallMemory(input: RecallMemoryInput): RecallMemoryResult {
   const db = getDb();
   const tool = (input.tool ?? '').trim() || null;
   const project = (input.project ?? '').trim() || null;
   const ftsQuery = input.query ? toFtsQuery(input.query) : '';
+
+  const globalFolderIds = new Set(getMemorySubtreeFolderIds('global'));
+  const toolFolderIds =
+    tool != null ? new Set(getMemorySubtreeFolderIds('tool', tool)) : new Set<string>();
+  const projectFolderIds =
+    project != null
+      ? new Set(getMemorySubtreeFolderIds('project', undefined, project))
+      : new Set<string>();
+
+  function noteMatchesScope(note: Note, scope: MemScope): boolean {
+    const effective = getEffectiveMemoryScope(note);
+    if (effective.scope !== scope) return false;
+    if (scope === 'global') return true;
+    if (scope === 'tool') return tool != null && effective.tool === tool;
+    if (scope === 'project') return project != null && effective.project === project;
+    return false;
+  }
+
+  function noteInMemoryFolder(note: Note, folderIds: Set<string>): boolean {
+    return note.folder_id != null && folderIds.has(note.folder_id);
+  }
+
+  function classifyNote(note: Note): MemScope | null {
+    const effective = getEffectiveMemoryScope(note);
+    if (effective.scope === 'global') return 'global';
+    if (effective.scope === 'tool' && tool && effective.tool === tool) return 'tool';
+    if (effective.scope === 'project' && project && effective.project === project)
+      return 'project';
+    if (note.mem_scope == null && note.folder_id) {
+      if (globalFolderIds.has(note.folder_id)) return 'global';
+      if (tool && toolFolderIds.has(note.folder_id)) return 'tool';
+      if (project && projectFolderIds.has(note.folder_id)) return 'project';
+    }
+    return null;
+  }
 
   let rows: Note[];
   if (ftsQuery) {
@@ -758,33 +926,24 @@ export function recallMemory(input: RecallMemoryInput): RecallMemoryResult {
         `SELECT Note.* FROM Note
          JOIN Note_fts ON Note_fts.note_id = Note.id
          WHERE Note_fts MATCH ?
-           AND (
-             Note.mem_scope = 'global'
-             OR (Note.mem_scope = 'tool' AND Note.mem_tool = ?)
-             OR (Note.mem_scope = 'project' AND Note.mem_project = ?)
-           )
          ORDER BY rank
-         LIMIT 50`
-      )
-      .all(ftsQuery, tool, project) as Note[];
-  } else {
-    rows = db
-      .prepare(
-        `SELECT * FROM Note
-         WHERE mem_scope = 'global'
-            OR (mem_scope = 'tool' AND mem_tool = ?)
-            OR (mem_scope = 'project' AND mem_project = ?)
-         ORDER BY
-           CASE mem_scope
-             WHEN 'global' THEN 0
-             WHEN 'tool' THEN 1
-             WHEN 'project' THEN 2
-             ELSE 3
-           END,
-           updated_at DESC
          LIMIT 100`
       )
-      .all(tool, project) as Note[];
+      .all(ftsQuery) as Note[];
+    rows = rows.filter(
+      (n) =>
+        noteMatchesScope(n, 'global') ||
+        noteMatchesScope(n, 'tool') ||
+        noteMatchesScope(n, 'project') ||
+        noteInMemoryFolder(n, globalFolderIds) ||
+        (tool != null && noteInMemoryFolder(n, toolFolderIds)) ||
+        (project != null && noteInMemoryFolder(n, projectFolderIds))
+    );
+  } else {
+    rows = db
+      .prepare('SELECT * FROM Note ORDER BY updated_at DESC LIMIT 500')
+      .all() as Note[];
+    rows = rows.filter((n) => classifyNote(n) !== null);
   }
 
   const result: RecallMemoryResult = {
@@ -793,10 +952,14 @@ export function recallMemory(input: RecallMemoryInput): RecallMemoryResult {
     project: [],
     count: 0,
   };
+  const seen = new Set<string>();
   for (const note of rows) {
-    if (note.mem_scope === 'global') result.global.push(note);
-    else if (note.mem_scope === 'tool') result.tool.push(note);
-    else if (note.mem_scope === 'project') result.project.push(note);
+    if (seen.has(note.id)) continue;
+    seen.add(note.id);
+    const bucket = classifyNote(note);
+    if (bucket === 'global') result.global.push(note);
+    else if (bucket === 'tool') result.tool.push(note);
+    else if (bucket === 'project') result.project.push(note);
   }
   result.count = result.global.length + result.tool.length + result.project.length;
   return result;
@@ -827,6 +990,28 @@ export function getUserByUsername(username: string): User | null {
   return row ?? null;
 }
 
+/** Bump session_version to invalidate all existing session tokens for a user. */
+export function bumpSessionVersion(userId: string): number {
+  const db = getDb();
+  db.prepare(
+    'UPDATE User SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?'
+  ).run(userId);
+  const row = db
+    .prepare('SELECT session_version FROM User WHERE id = ?')
+    .get(userId) as { session_version: number } | undefined;
+  return row?.session_version ?? 0;
+}
+
+export function updateUserPassword(userId: string, password: string): boolean {
+  const db = getDb();
+  const result = db
+    .prepare('UPDATE User SET password_hash = ? WHERE id = ?')
+    .run(hashPassword(password), userId);
+  if (result.changes === 0) return false;
+  bumpSessionVersion(userId);
+  return true;
+}
+
 export function createUser(
   username: string,
   password: string,
@@ -838,7 +1023,7 @@ export function createUser(
   db.prepare(
     'INSERT INTO User (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)'
   ).run(id, username, hashPassword(password), role, now);
-  return { id, username, password_hash: '', role, created_at: now };
+  return { id, username, password_hash: '', role, created_at: now, session_version: 0 };
 }
 
 export function deleteUser(id: string): boolean {

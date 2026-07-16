@@ -12,3 +12,9 @@ coverage
 .env.local
 .trae
 *:Zone.Identifier
+
+# Local MCP configs with API keys — do not commit
+.cursor/mcp.json
+**/.cursor/mcp.json
+opencode.json
+.config/opencode/opencode.json

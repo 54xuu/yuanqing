@@ -10,21 +10,12 @@ import {
   getSkillWithFiles,
   upsertSkill,
   deleteSkill,
-  listMcpConfigs,
-  getMcpConfig,
-  upsertMcpConfig,
-  deleteMcpConfig,
-  sanitizeMcpConfigJson,
 } from '../lib/db';
 import {
   handleListSkills,
   handleUploadSkill,
   handleDownloadSkill,
   handleDeleteSkill,
-  handleListMcp,
-  handleUploadMcp,
-  handleDownloadMcp,
-  handleDeleteMcp,
 } from '../mcp-server/index';
 
 const createdUserIds: string[] = [];
@@ -137,45 +128,6 @@ describe('Skill catalog isolation', () => {
   });
 });
 
-describe('McpConfig catalog', () => {
-  it('sanitizes api-key headers and isolates users', () => {
-    const a = makeUser('mcpa');
-    const b = makeUser('mcpb');
-
-    const sanitized = sanitizeMcpConfigJson({
-      url: 'https://example.com/api/mcp',
-      headers: { 'x-api-key': 'yq_secret_plain' },
-    });
-    expect(JSON.parse(sanitized).headers['x-api-key']).toBe(
-      '${YUANQING_API_KEY}'
-    );
-
-    const up = upsertMcpConfig(a.id, {
-      name: 'yuanqing',
-      description: 'cloud',
-      config: {
-        url: 'https://example.com/api/mcp',
-        headers: { 'x-api-key': 'yq_should_not_persist' },
-      },
-    });
-    expect('action' in up && up.action).toBe('created');
-    if ('mcp' in up) {
-      expect(up.mcp.config).toContain('${YUANQING_API_KEY}');
-      expect(up.mcp.config).not.toContain('yq_should_not_persist');
-    }
-
-    expect(listMcpConfigs(a.id)).toHaveLength(1);
-    expect(listMcpConfigs(b.id)).toHaveLength(0);
-    expect(getMcpConfig(b.id, 'yuanqing')).toBeNull();
-
-    expect(deleteMcpConfig(a.id, 'yuanqing')).toEqual({
-      action: 'deleted',
-      name: 'yuanqing',
-    });
-    expect(getMcpConfig(a.id, 'yuanqing')).toBeNull();
-  });
-});
-
 describe('MCP handlers with userId', () => {
   it('requires userId for catalog tools', async () => {
     const missing = await handleListSkills(undefined);
@@ -184,7 +136,7 @@ describe('MCP handlers with userId', () => {
     );
   });
 
-  it('upload → list → download → delete roundtrip for skill and mcp', async () => {
+  it('upload → list → download → delete roundtrip for skill', async () => {
     const user = makeUser('round');
     const key = createApiKey(user.id, 'test');
     createdApiKeyIds.push(key.id);
@@ -212,32 +164,6 @@ describe('MCP handlers with userId', () => {
     await handleDeleteSkill(uid, 'round-skill');
     expect(await handleDownloadSkill(uid, 'round-skill')).toEqual(
       expect.objectContaining({ error: 'skill not found' })
-    );
-
-    const upMcp = await handleUploadMcp(uid, {
-      name: 'demo-mcp',
-      description: 'd',
-      config: {
-        url: 'https://host/api/mcp',
-        headers: { Authorization: 'Bearer secret' },
-      },
-    });
-    expect('action' in upMcp).toBe(true);
-
-    const mcpList = await handleListMcp(uid);
-    expect('mcps' in mcpList && mcpList.count).toBe(1);
-
-    const mcpDl = await handleDownloadMcp(uid, 'demo-mcp');
-    expect('config' in mcpDl).toBe(true);
-    if ('config' in mcpDl) {
-      expect(
-        (mcpDl.config.headers as Record<string, string>).Authorization
-      ).toBe('${YUANQING_API_KEY}');
-    }
-
-    await handleDeleteMcp(uid, 'demo-mcp');
-    expect(await handleDownloadMcp(uid, 'demo-mcp')).toEqual(
-      expect.objectContaining({ error: 'mcp config not found' })
     );
   });
 });

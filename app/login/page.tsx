@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { APP_VERSION_LABEL } from "@/lib/version";
 
@@ -20,6 +20,17 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => {
+        if (res.ok) {
+          router.replace(next || "/");
+        }
+      })
+      .finally(() => setCheckingSession(false));
+  }, [router, next]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +49,7 @@ function LoginForm() {
       }
       const user = data.user as PublicUser;
       const target =
-        next || (user.role === "admin" ? "/admin" : "/");
+        next || "/";
       router.replace(target);
     } catch {
       setError("网络错误，请重试");
@@ -46,6 +57,10 @@ function LoginForm() {
       setLoading(false);
     }
   };
+
+  if (checkingSession) {
+    return <div className="auth-page" />;
+  }
 
   return (
     <div className="auth-page">

@@ -1,11 +1,11 @@
 ---
-description: 跨应用记忆规约（yuanqing MCP）— Cursor 端
+description: 跨应用记忆规约（Cursor）
 alwaysApply: true
 ---
 
 # 跨应用记忆规约（Cursor）
 
-云端 **源清（yuanqing）** 是唯一记忆真源。通过 MCP 工具 `recall_memory` / `save_memory` 读写，与 Trae 等其它客户端共享同一份记忆。
+云端 **源清（yuanqing）** 是唯一记忆真源。通过 MCP 工具 `recall_memory` / `save_memory` 读写，与 OpenCode 等其它客户端共享同一份记忆。
 
 本端标识：`tool=cursor`，写回时 `source_app=cursor`。
 
@@ -17,6 +17,8 @@ alwaysApply: true
 | 工具 | `tool` | 本工具或其它工具的特有踩坑/写法 | `工具记忆/<tool>/<主题>` |
 | 项目 | `project` | 当前仓库独有约定 | `项目记忆/<项目名>/<主题>` |
 
+**只要在上述目录下的笔记都属于记忆**（含网页手动创建），会被 `recall_memory` 召回。
+
 ## 会话开始 / 切换任务
 
 在开始实质性工作前，调用：
@@ -27,47 +29,20 @@ recall_memory({ tool: "cursor", project: "<当前仓库名>" })
 
 - `project` 取当前 git 仓库目录名（本仓为 `yuanqing`）。
 - 将返回的 `global` ∪ `tool` ∪ `project` 纳入上下文并遵守。
-- 若任务主题明确，可加 `query` 做关键词收窄。
 
 ## 沉淀记忆
 
 在以下时机调用 `save_memory`（直接改云端，勿只写本地规则文件代替）：
 
-1. 用户明确表达**持久偏好**（如「以后用简体中文」）→ `scope=global`
-2. 发现 **Cursor / Trae 工具特有**的行为或规避方式 → `scope=tool`，并填 `tool`
+1. 用户明确表达**持久偏好** → `scope=global`
+2. 发现 **Cursor / OpenCode 工具特有**的行为或规避方式 → `scope=tool`，并填 `tool`
 3. 确立 **本仓库** 约定或踩坑 → `scope=project`，`project=<仓库名>`
 
-示例：
+## 安全
 
-```
-save_memory({
-  scope: "project",
-  project: "yuanqing",
-  title: "PVC 权限与 entrypoint",
-  content: "...",
-  source_app: "cursor",
-  tags: ["deploy"]
-})
-```
+- **记忆正文不入 git**；仅云端 SQLite + MCP 访问。
+- MCP 配置（含 API Key）放在 `~/.cursor/mcp.json`，已加入 `.gitignore` 模式，勿提交仓库。
 
-```
-save_memory({
-  scope: "tool",
-  tool: "trae",
-  title: "WSL 项目写入规避",
-  content: "Trae 对 WSL/UNC 路径写入常失败；优先在 Linux 侧写文件。",
-  source_app: "cursor"
-})
-```
+## Skill 同步
 
-## 判定优先级
-
-- 与工具、项目都无关 → `global`
-- 只影响某个 Agent 应用 → `tool`（必须带 `tool`）
-- 只影响当前仓库 → `project`（必须带 `project`）
-- 同 scope + 同 title 会 **覆盖更新**，更新前先 `recall_memory` 或按 title 确认，避免误覆盖他人沉淀的长文。
-
-## 与旧工具的关系
-
-- 普通笔记仍可用 `search_notes` / `get_note` / `upsert_note` / `get_note_by_path`。
-- **跨端共享的「记忆」优先用 `recall_memory` / `save_memory`**，以便带上作用域元数据。
+无需专用 download skill：对 Agent 说「把 `yuanqing-recall-memory` 下载到 `~/.cursor/skills`」，Agent 调用 MCP `download_skill` 并写入本地文件。

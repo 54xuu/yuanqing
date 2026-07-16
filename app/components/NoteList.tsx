@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Folder } from "./FolderTree";
 import Toast from "./Toast";
+import { copyTextWithFallback } from "@/lib/copyToClipboard";
 
 export interface Note {
   id: string;
@@ -203,20 +204,22 @@ export default function NoteList(props: NoteListProps) {
     return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
   });
 
-  const handleCopyPath = async (note: Note, e: React.MouseEvent) => {
+  const handleCopyPath = (note: Note, e: React.MouseEvent) => {
     e.stopPropagation();
     const fullPath = getNoteFullPath(note, folders);
-    try {
-      await navigator.clipboard.writeText(fullPath);
-      setToastMessage(`已复制路径: ${fullPath}`);
-      setToastType("success");
-      setToastVisible(true);
-    } catch (err) {
-      console.error("复制失败:", err);
-      setToastMessage("复制失败，请手动复制");
-      setToastType("error");
-      setToastVisible(true);
-    }
+    const ok = copyTextWithFallback(fullPath, {
+      onSuccess: () => {
+        setToastMessage(`已复制路径: ${fullPath}`);
+        setToastType("success");
+        setToastVisible(true);
+      },
+      onFail: () => {
+        setToastMessage("已打开手动复制窗口");
+        setToastType("success");
+        setToastVisible(true);
+      },
+    });
+    if (ok) return;
   };
 
   return (

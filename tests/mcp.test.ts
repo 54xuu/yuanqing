@@ -9,6 +9,7 @@ import {
 } from '../mcp-server/index';
 import {
   createNote,
+  createFolder,
   deleteNote,
   deleteFolder,
   getNote,
@@ -222,7 +223,7 @@ describe('handleSaveMemory / handleRecallMemory', () => {
   it('saves global / tool / project memories and recalls by scope', async () => {
     const suffix = randomId();
     const globalTitle = `全局偏好 ${suffix}`;
-    const toolTitle = `Trae WSL 写入 ${suffix}`;
+    const toolTitle = `OpenCode WSL 写入 ${suffix}`;
     const projectTitle = `yuanqing 部署 ${suffix}`;
     const uniqueToken = `memtoken${suffix}`;
 
@@ -247,21 +248,21 @@ describe('handleSaveMemory / handleRecallMemory', () => {
 
     const toolSaved = await handleSaveMemory({
       scope: 'tool',
-      tool: 'trae',
+      tool: 'opencode',
       title: toolTitle,
-      content: `# Trae\nWSL 项目写入常失败，优先用 bash 侧写。\n${uniqueToken}`,
-      source_app: 'trae',
+      content: `# OpenCode\nWSL 项目写入常失败，优先用 bash 侧写。\n${uniqueToken}`,
+      source_app: 'opencode',
     });
     expect('action' in toolSaved).toBe(true);
     if ('action' in toolSaved) {
       expect(toolSaved.action).toBe('created');
       expect(toolSaved.note.mem_scope).toBe('tool');
-      expect(toolSaved.note.mem_tool).toBe('trae');
+      expect(toolSaved.note.mem_tool).toBe('opencode');
       createdNoteIds.push(toolSaved.note.id);
       const root = getFolderByParentAndName(null, '工具记忆');
       if (root) {
         createdFolderIds.push(root.id);
-        const child = getFolderByParentAndName(root.id, 'trae');
+        const child = getFolderByParentAndName(root.id, 'opencode');
         if (child) createdFolderIds.push(child.id);
       }
     }
@@ -287,7 +288,7 @@ describe('handleSaveMemory / handleRecallMemory', () => {
       }
     }
 
-    // Cursor + yuanqing: should see global + project, NOT trae tool memory.
+    // Cursor + yuanqing: should see global + project, NOT opencode tool memory.
     const cursorRecall = await handleRecallMemory({
       tool: 'cursor',
       project: 'yuanqing',
@@ -296,18 +297,18 @@ describe('handleSaveMemory / handleRecallMemory', () => {
     expect(cursorRecall.project.some((n) => n.title === projectTitle)).toBe(true);
     expect(cursorRecall.tool.some((n) => n.title === toolTitle)).toBe(false);
 
-    // Trae + yuanqing: should see global + trae tool + project.
-    const traeRecall = await handleRecallMemory({
-      tool: 'trae',
+    // OpenCode + yuanqing: should see global + opencode tool + project.
+    const opencodeRecall = await handleRecallMemory({
+      tool: 'opencode',
       project: 'yuanqing',
     });
-    expect(traeRecall.global.some((n) => n.title === globalTitle)).toBe(true);
-    expect(traeRecall.tool.some((n) => n.title === toolTitle)).toBe(true);
-    expect(traeRecall.project.some((n) => n.title === projectTitle)).toBe(true);
+    expect(opencodeRecall.global.some((n) => n.title === globalTitle)).toBe(true);
+    expect(opencodeRecall.tool.some((n) => n.title === toolTitle)).toBe(true);
+    expect(opencodeRecall.project.some((n) => n.title === projectTitle)).toBe(true);
 
     // Keyword filter within scope.
     const filtered = await handleRecallMemory({
-      tool: 'trae',
+      tool: 'opencode',
       project: 'yuanqing',
       query: uniqueToken,
     });
@@ -338,14 +339,14 @@ describe('handleSaveMemory / handleRecallMemory', () => {
       scope: 'global',
       title,
       content: 'second version',
-      source_app: 'trae',
+      source_app: 'opencode',
     });
     expect('action' in second).toBe(true);
     if ('action' in second && 'action' in first) {
       expect(second.action).toBe('updated');
       expect(second.note.id).toBe(first.note.id);
       expect(second.note.content).toBe('second version');
-      expect(second.note.source_app).toBe('trae');
+      expect(second.note.source_app).toBe('opencode');
     }
   });
 
@@ -377,5 +378,24 @@ describe('handleSaveMemory / handleRecallMemory', () => {
         (n) => n.id === plain.id
       )
     ).toBe(false);
+  });
+
+  it('recalls manually created notes under 全局记忆 folder', async () => {
+    const suffix = randomId();
+    let globalFolder = getFolderByParentAndName(null, '全局记忆');
+    if (!globalFolder) {
+      globalFolder = createFolder('全局记忆', null);
+      createdFolderIds.push(globalFolder.id);
+    }
+    const manual = createNote({
+      folder_id: globalFolder.id,
+      title: `ManualMem ${suffix}`,
+      content: '网页手动创建的全局记忆',
+    });
+    createdNoteIds.push(manual.id);
+    expect(manual.mem_scope).toBe('global');
+
+    const recalled = await handleRecallMemory({ tool: 'cursor' });
+    expect(recalled.global.some((n) => n.id === manual.id)).toBe(true);
   });
 });

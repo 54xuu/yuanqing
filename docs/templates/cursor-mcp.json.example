@@ -1,0 +1,30 @@
+# Cursor MCP 配置示例（勿提交含真实 Key 的文件）
+
+复制到 `~/.cursor/mcp.json` 或项目 `.cursor/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "yuanqing": {
+      "url": "https://你的域名/api/mcp",
+      "headers": {
+        "x-api-key": "yq_你的API密钥"
+      }
+    }
+  }
+}
+```
+
+本地 stdio 模式（与源清同机）：
+
+```json
+{
+  "mcpServers": {
+    "yuanqing": {
+      "command": "npx",
+      "args": ["tsx", "/absolute/path/to/yuanqing/mcp-server/index.ts"],
+      "cwd": "/absolute/path/to/yuanqing"
+    }
+  }
+}
+```

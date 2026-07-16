@@ -1,4 +1,4 @@
-import { verifySession, SESSION_COOKIE } from './session';
+import { verifySession, SESSION_COOKIE, clearSessionCookieHeader } from './session';
 import { getUserById, type User } from './db';
 
 /**
@@ -19,21 +19,39 @@ export function getCookie(request: Request, name: string): string | null {
   return null;
 }
 
+export type SessionCheck =
+  | { status: 'ok'; user: User }
+  | { status: 'missing' }
+  | { status: 'invalid'; clearCookie: boolean };
+
+/** Resolve session cookie → user; detect stale tokens that must be cleared. */
+export async function checkSession(request: Request): Promise<SessionCheck> {
+  const token = getCookie(request, SESSION_COOKIE);
+  if (!token) return { status: 'missing' };
+  const payload = await verifySession(token);
+  if (!payload) return { status: 'invalid', clearCookie: true };
+  const user = getUserById(payload.uid);
+  if (!user) return { status: 'invalid', clearCookie: true };
+  const sv = user.session_version ?? 0;
+  if (payload.sv !== sv) return { status: 'invalid', clearCookie: true };
+  return { status: 'ok', user };
+}
+
 /** Returns the current user from the session cookie, or null. */
 export async function getCurrentUser(request: Request): Promise<User | null> {
-  const token = getCookie(request, SESSION_COOKIE);
-  const userId = await verifySession(token);
-  if (!userId) return null;
-  return getUserById(userId);
+  const session = await checkSession(request);
+  return session.status === 'ok' ? session.user : null;
+}
+
+function unauthorizedResponse(clearCookie = false): Response {
+  const headers: HeadersInit = {};
+  if (clearCookie) headers['set-cookie'] = clearSessionCookieHeader();
+  return Response.json({ error: '未登录或登录已过期' }, { status: 401, headers });
 }
 
 export type AuthResult =
   | { ok: true; user: User }
   | { ok: false; response: Response };
-
-function unauthorized(): Response {
-  return Response.json({ error: '未登录或登录已过期' }, { status: 401 });
-}
 
 function forbidden(): Response {
   return Response.json({ error: '权限不足' }, { status: 403 });
@@ -41,17 +59,25 @@ function forbidden(): Response {
 
 /** Require an authenticated user. Returns 401 response if not logged in. */
 export async function requireUser(request: Request): Promise<AuthResult> {
-  const user = await getCurrentUser(request);
-  if (!user) return { ok: false, response: unauthorized() };
-  return { ok: true, user };
+  const session = await checkSession(request);
+  if (session.status === 'ok') return { ok: true, user: session.user };
+  return {
+    ok: false,
+    response: unauthorizedResponse(session.status === 'invalid' && session.clearCookie),
+  };
 }
 
 /** Require an admin user. Returns 401 if not logged in, 403 if not admin. */
 export async function requireAdmin(request: Request): Promise<AuthResult> {
-  const user = await getCurrentUser(request);
-  if (!user) return { ok: false, response: unauthorized() };
-  if (user.role !== 'admin') return { ok: false, response: forbidden() };
-  return { ok: true, user };
+  const session = await checkSession(request);
+  if (session.status !== 'ok') {
+    return {
+      ok: false,
+      response: unauthorizedResponse(session.status === 'invalid' && session.clearCookie),
+    };
+  }
+  if (session.user.role !== 'admin') return { ok: false, response: forbidden() };
+  return { ok: true, user: session.user };
 }
 
 /** Strip sensitive fields before sending a user to the client. */

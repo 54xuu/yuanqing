@@ -8,6 +8,16 @@
 
 export const SESSION_COOKIE = 'yq_session';
 
+/** Default session lifetime: 7 days (seconds). */
+export const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7;
+
+export type SessionPayload = {
+  uid: string;
+  iat: number;
+  exp: number;
+  sv: number;
+};
+
 // Stable dev-only fallback secret. The Edge middleware and Node route handlers
 // run in separate runtime contexts (even in `next dev`), so a per-process random
 // secret would be generated independently in each context and cookies signed by
@@ -41,6 +51,31 @@ function fromBase64Url(str: string): ArrayBuffer {
   return out.buffer;
 }
 
+function encodePayload(payload: SessionPayload): string {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  return toBase64Url(bytes);
+}
+
+function decodePayload(encoded: string): SessionPayload | null {
+  try {
+    const bin = fromBase64Url(encoded);
+    const json = new TextDecoder().decode(bin);
+    const parsed = JSON.parse(json) as SessionPayload;
+    if (
+      typeof parsed.uid !== 'string' ||
+      typeof parsed.iat !== 'number' ||
+      typeof parsed.exp !== 'number' ||
+      typeof parsed.sv !== 'number'
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 async function importHmacKey(): Promise<CryptoKey> {
   const enc = new TextEncoder();
   return globalThis.crypto.subtle.importKey(
@@ -52,22 +87,40 @@ async function importHmacKey(): Promise<CryptoKey> {
   );
 }
 
-/** Sign a userId into a `userId.signature` session token. */
-export async function signSession(userId: string): Promise<string> {
+/** Sign a session payload into `base64url(payload).signature`. */
+export async function signSession(
+  userId: string,
+  sessionVersion: number,
+  maxAgeSec: number = SESSION_MAX_AGE_SEC
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const payload: SessionPayload = {
+    uid: userId,
+    iat: now,
+    exp: now + maxAgeSec,
+    sv: sessionVersion,
+  };
+  const payloadStr = encodePayload(payload);
   const key = await importHmacKey();
   const enc = new TextEncoder();
-  const sig = await globalThis.crypto.subtle.sign('HMAC', key, enc.encode(userId));
-  return `${userId}.${toBase64Url(new Uint8Array(sig))}`;
+  const sig = await globalThis.crypto.subtle.sign('HMAC', key, enc.encode(payloadStr));
+  return `${payloadStr}.${toBase64Url(new Uint8Array(sig))}`;
 }
 
-/** Verify a session token. Returns the userId if valid, otherwise null. */
-export async function verifySession(token: string | undefined | null): Promise<string | null> {
+/**
+ * Verify a session token signature and expiry.
+ * Returns the payload if valid and not expired; otherwise null.
+ * Does NOT check session_version against DB (Node layer does that).
+ */
+export async function verifySession(
+  token: string | undefined | null
+): Promise<SessionPayload | null> {
   if (!token) return null;
   const sep = token.indexOf('.');
   if (sep === -1) return null;
-  const userId = token.slice(0, sep);
+  const payloadStr = token.slice(0, sep);
   const sigStr = token.slice(sep + 1);
-  if (!userId || !sigStr) return null;
+  if (!payloadStr || !sigStr) return null;
   try {
     const key = await importHmacKey();
     const enc = new TextEncoder();
@@ -75,9 +128,14 @@ export async function verifySession(token: string | undefined | null): Promise<s
       'HMAC',
       key,
       fromBase64Url(sigStr),
-      enc.encode(userId)
+      enc.encode(payloadStr)
     );
-    return ok ? userId : null;
+    if (!ok) return null;
+    const payload = decodePayload(payloadStr);
+    if (!payload) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp < now) return null;
+    return payload;
   } catch {
     return null;
   }
@@ -97,6 +155,12 @@ export function sessionCookieOptions(): {
     secure:
       process.env.NODE_ENV === 'production' &&
       process.env.YUANQING_COOKIE_SECURE !== 'false',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: SESSION_MAX_AGE_SEC,
   };
+}
+
+/** Build Set-Cookie header value that clears the session cookie. */
+export function clearSessionCookieHeader(): string {
+  const opts = sessionCookieOptions();
+  return `${SESSION_COOKIE}=; Path=${opts.path}; HttpOnly; SameSite=${opts.sameSite}; Max-Age=0${opts.secure ? '; Secure' : ''}`;
 }

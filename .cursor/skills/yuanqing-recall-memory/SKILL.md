@@ -21,7 +21,7 @@ description: >-
 
 ```
 recall_memory({
-  tool: "<当前应用>",      // cursor | trae | ...
+  tool: "<当前应用>",      // cursor | opencode
   project: "<当前仓库目录名>", // 如 yuanqing；无关项目时可省略
   query: "<可选关键词>"     // 收窄召回
 })
@@ -43,8 +43,8 @@ recall_memory({
 recall_memory({ tool: "cursor", project: "yuanqing" })
 ```
 
-在 Trae 办公、无具体仓库：
+在 OpenCode 办公、无具体仓库：
 
 ```
-recall_memory({ tool: "trae" })
+recall_memory({ tool: "opencode" })
 ```

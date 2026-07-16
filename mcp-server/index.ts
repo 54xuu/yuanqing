@@ -18,10 +18,6 @@ import {
   getSkillWithFiles,
   upsertSkill,
   deleteSkill,
-  listMcpConfigs,
-  getMcpConfig,
-  upsertMcpConfig,
-  deleteMcpConfig,
   type Note,
   type NoteSummary,
   type MemScope,
@@ -29,8 +25,6 @@ import {
   type RecallMemoryResult,
   type SkillSummary,
   type SkillWithFiles,
-  type McpConfig,
-  type McpConfigSummary,
   type SkillFileEncoding,
 } from '../lib/db';
 
@@ -145,7 +139,7 @@ export type SaveMemoryResult = UpsertMemoryResult;
  * Persist a memory note with scope metadata so other agents can recall it.
  * Scope guide:
  * - global: preferences unrelated to any tool/project (language, coding style)
- * - tool: quirks of a specific agent app (cursor / trae)
+ * - tool: quirks of a specific agent app (cursor / opencode)
  * - project: conventions unique to one repository
  */
 export async function handleSaveMemory(input: {
@@ -244,70 +238,6 @@ export async function handleDeleteSkill(
   return deleteSkill(ctx.userId, name);
 }
 
-export type ListMcpResult =
-  | { count: number; mcps: McpConfigSummary[] }
-  | { error: string };
-
-export async function handleListMcp(
-  userId: string | undefined
-): Promise<ListMcpResult> {
-  const ctx = requireUserId(userId);
-  if ('error' in ctx) return ctx;
-  const mcps = listMcpConfigs(ctx.userId);
-  return { count: mcps.length, mcps };
-}
-
-export type DownloadMcpResult =
-  | { mcp: McpConfig; config: Record<string, unknown> }
-  | { error: string; name?: string };
-
-export async function handleDownloadMcp(
-  userId: string | undefined,
-  name: string
-): Promise<DownloadMcpResult> {
-  const ctx = requireUserId(userId);
-  if ('error' in ctx) return ctx;
-  const mcp = getMcpConfig(ctx.userId, name);
-  if (!mcp) return { error: 'mcp config not found', name };
-  let config: Record<string, unknown> = {};
-  try {
-    config = JSON.parse(mcp.config) as Record<string, unknown>;
-  } catch {
-    config = {};
-  }
-  return { mcp, config };
-}
-
-export type UploadMcpResult =
-  | { action: 'created' | 'updated'; mcp: McpConfig }
-  | { error: string };
-
-export async function handleUploadMcp(
-  userId: string | undefined,
-  input: {
-    name: string;
-    description?: string;
-    config: unknown;
-  }
-): Promise<UploadMcpResult> {
-  const ctx = requireUserId(userId);
-  if ('error' in ctx) return ctx;
-  return upsertMcpConfig(ctx.userId, input);
-}
-
-export type DeleteMcpToolResult =
-  | { action: 'deleted'; name: string }
-  | { error: string };
-
-export async function handleDeleteMcp(
-  userId: string | undefined,
-  name: string
-): Promise<DeleteMcpToolResult> {
-  const ctx = requireUserId(userId);
-  if ('error' in ctx) return ctx;
-  return deleteMcpConfig(ctx.userId, name);
-}
-
 function jsonResult(data: unknown, isError = false) {
   return {
     content: [
@@ -383,12 +313,12 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
   // Tool: recall_memory
   server.tool(
     'recall_memory',
-    'Recall shared cross-app memories for the current context. Returns a pack grouped as { global, tool, project, count }. Call at session start or when switching tasks. Pass tool (e.g. "cursor"/"trae") and project (repo name) so the server returns global ∪ matching tool memories ∪ matching project memories. Optional query further filters by keyword.',
+    'Recall shared cross-app memories for the current context. Returns a pack grouped as { global, tool, project, count }. Call at session start or when switching tasks. Pass tool (e.g. "cursor"/"opencode") and project (repo name) so the server returns global ∪ matching tool memories ∪ matching project memories. Notes under 全局记忆/工具记忆/项目记忆 folders are included even if created manually in the web UI.',
     {
       tool: z
         .string()
         .optional()
-        .describe('Current agent app name, e.g. "cursor" or "trae".'),
+        .describe('Current agent app name, e.g. "cursor" or "opencode".'),
       project: z
         .string()
         .optional()
@@ -407,7 +337,7 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
   // Tool: save_memory
   server.tool(
     'save_memory',
-    'Persist a memory to the shared cloud knowledge base so other agents (Cursor/Trae/etc.) can recall it. Scope guide: use "global" for preferences unrelated to any tool/project (output language, coding norms); use "tool" for quirks of a specific agent app (requires tool=cursor|trae); use "project" for conventions unique to one repository (requires project=<repo>). Same title under the same scope upserts (overwrites) the existing memory.',
+    'Persist a memory to the shared cloud knowledge base so other agents (Cursor/OpenCode) can recall it. Scope guide: use "global" for preferences unrelated to any tool/project (output language, coding norms); use "tool" for quirks of a specific agent app (requires tool=cursor|opencode); use "project" for conventions unique to one repository (requires project=<repo>). Same title under the same scope upserts (overwrites) the existing memory.',
     {
       scope: z
         .enum(['global', 'tool', 'project'])
@@ -415,7 +345,7 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
       tool: z
         .string()
         .optional()
-        .describe('Required when scope="tool". e.g. "cursor" or "trae".'),
+        .describe('Required when scope="tool". e.g. "cursor" or "opencode".'),
       project: z
         .string()
         .optional()
@@ -425,7 +355,7 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
       source_app: z
         .string()
         .optional()
-        .describe('Which app is writing this memory, e.g. "cursor" or "trae".'),
+        .describe('Which app is writing this memory, e.g. "cursor" or "opencode".'),
       tags: z
         .array(z.string())
         .optional()
@@ -449,7 +379,7 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
 
   server.tool(
     'list_skills',
-    'List skills in the current yuanqing account catalog (scoped by API key user). Returns { count, skills: [{ name, description, version, updated_at, file_count }] }.',
+    'List skills in the current yuanqing account catalog (scoped by API key user). Returns { count, skills: [{ name, description, version, updated_at, file_count }] }. Use before download_skill to discover available skill names.',
     {},
     async () => {
       const data = await handleListSkills(ctx.userId);
@@ -459,7 +389,7 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
 
   server.tool(
     'download_skill',
-    'Download a skill package (multi-file) from the current yuanqing account. Returns { skill: { name, description, version, files: [{ path, content, encoding }] } }. Write files under the target tool skill directory (see yuanqing-download-skill).',
+    'Download a skill package from the yuanqing cloud catalog. Returns { skill: { name, description, version, files: [{ path, content, encoding }] } }. After calling this tool, YOU (the agent) must write each file to the user-specified local directory using your file tools. Typical targets: Cursor → ~/.cursor/skills/<name>/ ; OpenCode → ~/.config/opencode/skills/<name>/ . Example user request: "把 yuanqing-recall-memory 下载到 ~/.cursor/skills" → call download_skill({ name: "yuanqing-recall-memory" }), then write skill.files to ~/.cursor/skills/yuanqing-recall-memory/<path>.',
     {
       name: z
         .string()
@@ -473,7 +403,7 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
 
   server.tool(
     'upload_skill',
-    'Upload or overwrite a skill package for the current yuanqing account. Pass all files relative to the skill root (e.g. SKILL.md, scripts/foo.sh). encoding defaults to utf8; use base64 for binary. Same name upserts and increments version. Secret headers are not applicable here.',
+    'Upload or overwrite a skill package to the yuanqing cloud catalog. When the user asks to upload a local skill directory, YOU must first read all files from the specified path (e.g. ~/.cursor/skills/yuanqing-save-memory/) using your file tools, then call this tool with files: [{ path, content }]. encoding defaults to utf8; use base64 for binary. Same name upserts and increments version.',
     {
       name: z.string().describe('Skill name matching [a-z0-9-].'),
       description: z
@@ -513,64 +443,6 @@ function registerTools(server: McpServer, ctx: McpServerContext): void {
     },
     async ({ name }) => {
       const data = await handleDeleteSkill(ctx.userId, name);
-      return jsonResult(data, 'error' in data);
-    }
-  );
-
-  // ---- MCP config catalog ----
-
-  server.tool(
-    'list_mcp',
-    'List MCP server configs stored in the current yuanqing account catalog. Returns { count, mcps: [{ name, description, updated_at }] }.',
-    {},
-    async () => {
-      const data = await handleListMcp(ctx.userId);
-      return jsonResult(data, 'error' in data);
-    }
-  );
-
-  server.tool(
-    'download_mcp',
-    'Download one MCP server config. Returns { mcp, config } where config is the JSON fragment to merge into mcpServers[name]. Sensitive headers are stored as ${YUANQING_API_KEY} placeholders — replace with the local key when writing.',
-    {
-      name: z.string().describe('MCP server name, e.g. "yuanqing".'),
-    },
-    async ({ name }) => {
-      const data = await handleDownloadMcp(ctx.userId, name);
-      return jsonResult(data, 'error' in data);
-    }
-  );
-
-  server.tool(
-    'upload_mcp',
-    'Upload or overwrite an MCP server config for the current yuanqing account. config is the JSON object for one server (url/command/headers/env). Values in headers matching api-key/authorization/token/secret are replaced with ${YUANQING_API_KEY} before storage.',
-    {
-      name: z.string().describe('MCP server name matching [a-z0-9-].'),
-      description: z.string().optional().describe('Short description.'),
-      config: z
-        .union([z.record(z.string(), z.unknown()), z.string()])
-        .describe(
-          'MCP server JSON object, or a JSON string. Example: { "url": "https://host/api/mcp", "headers": { "x-api-key": "..." } }.'
-        ),
-    },
-    async ({ name, description, config }) => {
-      const data = await handleUploadMcp(ctx.userId, {
-        name,
-        description,
-        config,
-      });
-      return jsonResult(data, 'error' in data);
-    }
-  );
-
-  server.tool(
-    'delete_mcp',
-    'Soft-delete an MCP config from the current yuanqing account catalog.',
-    {
-      name: z.string().describe('MCP server name to delete.'),
-    },
-    async ({ name }) => {
-      const data = await handleDeleteMcp(ctx.userId, name);
       return jsonResult(data, 'error' in data);
     }
   );

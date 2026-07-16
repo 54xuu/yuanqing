@@ -4,11 +4,12 @@ import { useEffect, useState, useTransition } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Note } from "./NoteList";
+import Toast from "./Toast";
 
 interface NoteEditorProps {
   note: Note | null;
   loading?: boolean;
-  onSave: (id: string, data: { title: string; content: string }) => void;
+  onSave: (id: string, data: { title: string; content: string }) => Promise<boolean>;
 }
 
 const LARGE_CONTENT_THRESHOLD = 50000;
@@ -19,6 +20,10 @@ export default function NoteEditor({ note, loading, onSave }: NoteEditorProps) {
   const [content, setContent] = useState("");
   const [preview, setPreview] = useState(true);
   const [isPending, startTransition] = useTransition();
+  const [saving, setSaving] = useState(false);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState<"success" | "error">("success");
 
   useEffect(() => {
     if (note) {
@@ -65,17 +70,48 @@ export default function NoteEditor({ note, loading, onSave }: NoteEditorProps) {
     }
   };
 
+  const handleSave = async () => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setToastMessage("标题不能为空");
+      setToastType("error");
+      setToastVisible(true);
+      return;
+    }
+    setSaving(true);
+    try {
+      const ok = await onSave(note.id, { title: trimmedTitle, content });
+      if (ok) {
+        setToastMessage(`已保存: ${trimmedTitle}`);
+        setToastType("success");
+      } else {
+        setToastMessage("保存失败，请重试");
+        setToastType("error");
+      }
+      setToastVisible(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="note-editor">
+      <Toast
+        message={toastMessage}
+        type={toastType}
+        visible={toastVisible}
+        onClose={() => setToastVisible(false)}
+      />
       <div className="editor-toolbar">
         <button className="small-btn" onClick={handleTogglePreview}>
           {preview ? "编辑" : "预览"}
         </button>
         <button
           className="small-btn primary"
-          onClick={() => onSave(note.id, { title, content })}
+          onClick={handleSave}
+          disabled={saving}
         >
-          保存
+          {saving ? "保存中..." : "保存"}
         </button>
         {isLargeContent && (
           <span className="large-content-warning">

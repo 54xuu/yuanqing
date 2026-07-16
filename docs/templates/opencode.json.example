@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "yuanqing": {
+      "type": "remote",
+      "url": "https://你的域名/api/mcp",
+      "headers": {
+        "x-api-key": "yq_你的API密钥"
+      },
+      "enabled": true
+    }
+  }
+}
