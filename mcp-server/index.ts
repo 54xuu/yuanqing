@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  ListPromptsRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListResourcesRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import {
   searchNotes,
@@ -458,6 +463,22 @@ export function resolveMcpUserId(ctx?: McpServerContext): string | undefined {
 }
 
 /**
+ * OpenCode (and some other MCP clients) call optional prompts/list and
+ * resources/list during handshake. Return empty lists instead of -32601.
+ */
+function registerOptionalListHandlers(server: McpServer): void {
+  server.server.registerCapabilities({
+    prompts: { listChanged: false },
+    resources: { listChanged: false, subscribe: false },
+  });
+  server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
+  server.server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
+  server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [],
+  }));
+}
+
+/**
  * Build a fresh, configured McpServer instance with tools registered.
  * Used by both the stdio entry and the HTTP (`/api/mcp`) transport.
  * Pass `{ userId }` from the authenticated API key so catalog tools are scoped.
@@ -469,6 +490,7 @@ export function createMcpServer(ctx?: McpServerContext): McpServer {
   });
   const userId = resolveMcpUserId(ctx);
   registerTools(server, { userId });
+  registerOptionalListHandlers(server);
   return server;
 }
 

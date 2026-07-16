@@ -4,6 +4,7 @@
     "yuanqing": {
       "type": "remote",
       "url": "https://你的域名/api/mcp",
+      "oauth": false,
       "headers": {
         "x-api-key": "yq_你的API密钥"
       },
