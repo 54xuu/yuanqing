@@ -260,6 +260,19 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_mcpconfig_user ON McpConfig(user_id);
     CREATE INDEX IF NOT EXISTS idx_mcpconfig_user_deleted ON McpConfig(user_id, is_deleted);
+
+    CREATE TABLE IF NOT EXISTS MemoryAlias (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      name TEXT NOT NULL,
+      group_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (scope, name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memoryalias_scope_group
+      ON MemoryAlias(scope, group_key);
   `);
 
   ensureColumn(db, 'Folder', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0');
@@ -418,6 +431,7 @@ export function updateFolder(id: string, input: FolderUpdateInput): Folder | nul
   const existing = getFolder(id);
   if (!existing) return null;
 
+  const oldPath = getFolderPathFromRoot(id);
   const name = input.name ?? existing.name;
   const sort_order = input.sort_order ?? existing.sort_order;
   const parent_id = input.parent_id === undefined ? existing.parent_id : input.parent_id;
@@ -434,6 +448,33 @@ export function updateFolder(id: string, input: FolderUpdateInput): Folder | nul
   db.prepare(
     'UPDATE Folder SET name = ?, parent_id = ?, sort_order = ? WHERE id = ?'
   ).run(name, parent_id, sort_order, id);
+
+  // Sync mem_scope columns for every note under this folder subtree.
+  const subtreeIds = getFolderSubtreeIds(id);
+  if (subtreeIds.length > 0) {
+    const noteRows = db
+      .prepare(
+        `SELECT id FROM Note WHERE folder_id IN (${subtreeIds.map(() => '?').join(',')})`
+      )
+      .all(...subtreeIds) as { id: string }[];
+    for (const { id: noteId } of noteRows) {
+      applyMemoryMetadataFromFolder(noteId);
+    }
+  }
+
+  // If renaming a project/tool memory folder (二级目录), migrate alias table.
+  const newPath = getFolderPathFromRoot(id);
+  if (
+    oldPath.length === 2 &&
+    newPath.length === 2 &&
+    name !== existing.name &&
+    oldPath[0] === newPath[0] &&
+    (oldPath[0] === MEMORY_ROOT_PROJECT || oldPath[0] === MEMORY_ROOT_TOOL)
+  ) {
+    const scope: MemoryAliasScope =
+      oldPath[0] === MEMORY_ROOT_PROJECT ? 'project' : 'tool';
+    renameMemoryAlias(scope, existing.name, name);
+  }
 
   return getFolder(id);
 }
@@ -667,6 +708,268 @@ const MEMORY_ROOT_GLOBAL = '全局记忆';
 const MEMORY_ROOT_TOOL = '工具记忆';
 const MEMORY_ROOT_PROJECT = '项目记忆';
 
+// ---------- Memory aliases (project / tool name groups) ----------
+
+export type MemoryAliasScope = 'project' | 'tool';
+
+export interface MemoryAlias {
+  id: string;
+  scope: MemoryAliasScope;
+  name: string;
+  group_key: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryAliasGroup {
+  scope: MemoryAliasScope;
+  group_key: string;
+  names: string[];
+}
+
+function normalizeAliasName(name: string): string {
+  return name.trim();
+}
+
+function newGroupKey(): string {
+  return uuidv4();
+}
+
+/** All names in the same alias group as `name` (includes itself). Alone → [name]. */
+export function resolveMemoryAliasNames(
+  scope: MemoryAliasScope,
+  name: string
+): string[] {
+  const n = normalizeAliasName(name);
+  if (!n) return [];
+  const db = getDb();
+  const row = db
+    .prepare('SELECT group_key FROM MemoryAlias WHERE scope = ? AND name = ?')
+    .get(scope, n) as { group_key: string } | undefined;
+  if (!row) return [n];
+  const peers = db
+    .prepare(
+      'SELECT name FROM MemoryAlias WHERE scope = ? AND group_key = ? ORDER BY name ASC'
+    )
+    .all(scope, row.group_key) as { name: string }[];
+  const names = peers.map((p) => p.name);
+  return names.length > 0 ? names : [n];
+}
+
+/** List alias groups, optionally filtered by scope. */
+export function listMemoryAliasGroups(
+  scope?: MemoryAliasScope
+): MemoryAliasGroup[] {
+  const db = getDb();
+  const rows = (
+    scope
+      ? db
+          .prepare(
+            'SELECT * FROM MemoryAlias WHERE scope = ? ORDER BY group_key, name'
+          )
+          .all(scope)
+      : db
+          .prepare('SELECT * FROM MemoryAlias ORDER BY scope, group_key, name')
+          .all()
+  ) as MemoryAlias[];
+
+  const map = new Map<string, MemoryAliasGroup>();
+  for (const row of rows) {
+    const key = `${row.scope}::${row.group_key}`;
+    let group = map.get(key);
+    if (!group) {
+      group = { scope: row.scope, group_key: row.group_key, names: [] };
+      map.set(key, group);
+    }
+    group.names.push(row.name);
+  }
+  return [...map.values()];
+}
+
+export type LinkMemoryAliasesResult =
+  | { action: 'linked'; group: MemoryAliasGroup }
+  | { error: string };
+
+/** Merge multiple names into one alias group (same scope). */
+export function linkMemoryAliases(
+  scope: MemoryAliasScope,
+  names: string[]
+): LinkMemoryAliasesResult {
+  if (scope !== 'project' && scope !== 'tool') {
+    return { error: 'scope must be "project" or "tool"' };
+  }
+  const unique = [
+    ...new Set(
+      names.map(normalizeAliasName).filter((n) => n.length > 0)
+    ),
+  ];
+  if (unique.length < 2) {
+    return { error: 'at least two distinct names are required' };
+  }
+
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const existing = db
+    .prepare(
+      `SELECT * FROM MemoryAlias WHERE scope = ? AND name IN (${unique
+        .map(() => '?')
+        .join(',')})`
+    )
+    .all(scope, ...unique) as MemoryAlias[];
+
+  // Prefer an existing group_key; if multiple groups, merge into the first.
+  let groupKey =
+    existing.length > 0 ? existing[0].group_key : newGroupKey();
+  const otherKeys = new Set(
+    existing.map((e) => e.group_key).filter((k) => k !== groupKey)
+  );
+
+  const tx = db.transaction(() => {
+    for (const other of otherKeys) {
+      db.prepare(
+        'UPDATE MemoryAlias SET group_key = ?, updated_at = ? WHERE scope = ? AND group_key = ?'
+      ).run(groupKey, now, scope, other);
+    }
+    const upsert = db.prepare(
+      `INSERT INTO MemoryAlias (id, scope, name, group_key, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope, name) DO UPDATE SET
+         group_key = excluded.group_key,
+         updated_at = excluded.updated_at`
+    );
+    for (const name of unique) {
+      const row = existing.find((e) => e.name === name);
+      upsert.run(row?.id ?? uuidv4(), scope, name, groupKey, row?.created_at ?? now, now);
+    }
+  });
+  tx();
+
+  const peers = db
+    .prepare(
+      'SELECT name FROM MemoryAlias WHERE scope = ? AND group_key = ? ORDER BY name ASC'
+    )
+    .all(scope, groupKey) as { name: string }[];
+  return {
+    action: 'linked',
+    group: { scope, group_key: groupKey, names: peers.map((p) => p.name) },
+  };
+}
+
+export type UnlinkMemoryAliasResult =
+  | { action: 'unlinked'; name: string }
+  | { error: string };
+
+/** Remove a name from its alias group (delete the alias row). */
+export function unlinkMemoryAlias(
+  scope: MemoryAliasScope,
+  name: string
+): UnlinkMemoryAliasResult {
+  const n = normalizeAliasName(name);
+  if (!n) return { error: 'name must not be empty' };
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM MemoryAlias WHERE scope = ? AND name = ?')
+    .get(scope, n) as MemoryAlias | undefined;
+  if (!row) return { error: `alias not found: ${n}` };
+
+  const groupKey = row.group_key;
+  db.prepare('DELETE FROM MemoryAlias WHERE scope = ? AND name = ?').run(
+    scope,
+    n
+  );
+
+  // Drop singleton groups (one name left alone has no alias meaning).
+  const remaining = db
+    .prepare(
+      'SELECT id, name FROM MemoryAlias WHERE scope = ? AND group_key = ?'
+    )
+    .all(scope, groupKey) as { id: string; name: string }[];
+  if (remaining.length === 1) {
+    db.prepare('DELETE FROM MemoryAlias WHERE id = ?').run(remaining[0].id);
+  }
+
+  return { action: 'unlinked', name: n };
+}
+
+/** Rename an alias entry when a project/tool folder is renamed. */
+export function renameMemoryAlias(
+  scope: MemoryAliasScope,
+  oldName: string,
+  newName: string
+): void {
+  const from = normalizeAliasName(oldName);
+  const to = normalizeAliasName(newName);
+  if (!from || !to || from === to) return;
+  const db = getDb();
+  const now = new Date().toISOString();
+  const existing = db
+    .prepare('SELECT * FROM MemoryAlias WHERE scope = ? AND name = ?')
+    .get(scope, from) as MemoryAlias | undefined;
+  if (!existing) return;
+
+  const conflict = db
+    .prepare('SELECT id FROM MemoryAlias WHERE scope = ? AND name = ?')
+    .get(scope, to) as { id: string } | undefined;
+  if (conflict) {
+    // Target name already in a group: merge old group into target's group, drop old name.
+    const target = db
+      .prepare('SELECT * FROM MemoryAlias WHERE id = ?')
+      .get(conflict.id) as MemoryAlias;
+    db.prepare(
+      'UPDATE MemoryAlias SET group_key = ?, updated_at = ? WHERE scope = ? AND group_key = ?'
+    ).run(target.group_key, now, scope, existing.group_key);
+    db.prepare('DELETE FROM MemoryAlias WHERE scope = ? AND name = ?').run(
+      scope,
+      from
+    );
+    return;
+  }
+
+  db.prepare(
+    'UPDATE MemoryAlias SET name = ?, updated_at = ? WHERE scope = ? AND name = ?'
+  ).run(to, now, scope, from);
+}
+
+/** Distinct project / tool names from memories + alias table (for UI pickers). */
+export function listKnownMemoryNames(): {
+  projectNames: string[];
+  toolNames: string[];
+} {
+  const db = getDb();
+  const projects = new Set<string>();
+  const tools = new Set<string>();
+
+  const memProjects = db
+    .prepare(
+      `SELECT DISTINCT mem_project AS name FROM Note
+       WHERE mem_scope = 'project' AND mem_project IS NOT NULL AND mem_project != ''`
+    )
+    .all() as { name: string }[];
+  for (const r of memProjects) projects.add(r.name);
+
+  const memTools = db
+    .prepare(
+      `SELECT DISTINCT mem_tool AS name FROM Note
+       WHERE mem_scope = 'tool' AND mem_tool IS NOT NULL AND mem_tool != ''`
+    )
+    .all() as { name: string }[];
+  for (const r of memTools) tools.add(r.name);
+
+  const aliases = db
+    .prepare('SELECT scope, name FROM MemoryAlias')
+    .all() as { scope: MemoryAliasScope; name: string }[];
+  for (const a of aliases) {
+    if (a.scope === 'project') projects.add(a.name);
+    else if (a.scope === 'tool') tools.add(a.name);
+  }
+
+  return {
+    projectNames: [...projects].sort(),
+    toolNames: [...tools].sort(),
+  };
+}
+
 /** Folder path from root to folder (inclusive). */
 export function getFolderPathFromRoot(folderId: string | null): string[] {
   if (!folderId) return [];
@@ -875,7 +1178,7 @@ export function upsertMemory(input: UpsertMemoryInput): UpsertMemoryResult {
 
 /**
  * Recall memories for the current client context:
- * global ∪ (tool == tool) ∪ (project == project).
+ * global ∪ (tool ∈ aliasGroup(tool)) ∪ (project ∈ aliasGroup(project)).
  * Notes under 全局记忆/工具记忆/项目记忆 folders count even if mem_scope was null.
  */
 export function recallMemory(input: RecallMemoryInput): RecallMemoryResult {
@@ -884,20 +1187,39 @@ export function recallMemory(input: RecallMemoryInput): RecallMemoryResult {
   const project = (input.project ?? '').trim() || null;
   const ftsQuery = input.query ? toFtsQuery(input.query) : '';
 
-  const globalFolderIds = new Set(getMemorySubtreeFolderIds('global'));
-  const toolFolderIds =
-    tool != null ? new Set(getMemorySubtreeFolderIds('tool', tool)) : new Set<string>();
-  const projectFolderIds =
+  const toolNames =
+    tool != null ? new Set(resolveMemoryAliasNames('tool', tool)) : new Set<string>();
+  const projectNames =
     project != null
-      ? new Set(getMemorySubtreeFolderIds('project', undefined, project))
+      ? new Set(resolveMemoryAliasNames('project', project))
       : new Set<string>();
+
+  const globalFolderIds = new Set(getMemorySubtreeFolderIds('global'));
+  const toolFolderIds = new Set<string>();
+  for (const t of toolNames) {
+    for (const id of getMemorySubtreeFolderIds('tool', t)) {
+      toolFolderIds.add(id);
+    }
+  }
+  const projectFolderIds = new Set<string>();
+  for (const p of projectNames) {
+    for (const id of getMemorySubtreeFolderIds('project', undefined, p)) {
+      projectFolderIds.add(id);
+    }
+  }
 
   function noteMatchesScope(note: Note, scope: MemScope): boolean {
     const effective = getEffectiveMemoryScope(note);
     if (effective.scope !== scope) return false;
     if (scope === 'global') return true;
-    if (scope === 'tool') return tool != null && effective.tool === tool;
-    if (scope === 'project') return project != null && effective.project === project;
+    if (scope === 'tool')
+      return tool != null && effective.tool != null && toolNames.has(effective.tool);
+    if (scope === 'project')
+      return (
+        project != null &&
+        effective.project != null &&
+        projectNames.has(effective.project)
+      );
     return false;
   }
 
@@ -908,8 +1230,19 @@ export function recallMemory(input: RecallMemoryInput): RecallMemoryResult {
   function classifyNote(note: Note): MemScope | null {
     const effective = getEffectiveMemoryScope(note);
     if (effective.scope === 'global') return 'global';
-    if (effective.scope === 'tool' && tool && effective.tool === tool) return 'tool';
-    if (effective.scope === 'project' && project && effective.project === project)
+    if (
+      effective.scope === 'tool' &&
+      tool &&
+      effective.tool &&
+      toolNames.has(effective.tool)
+    )
+      return 'tool';
+    if (
+      effective.scope === 'project' &&
+      project &&
+      effective.project &&
+      projectNames.has(effective.project)
+    )
       return 'project';
     if (note.mem_scope == null && note.folder_id) {
       if (globalFolderIds.has(note.folder_id)) return 'global';

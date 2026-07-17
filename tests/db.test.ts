@@ -13,8 +13,16 @@ import {
   updateFolder,
   deleteFolder,
   getNoteByPath,
+  getFolderByParentAndName,
+  upsertMemory,
+  recallMemory,
+  resolveMemoryAliasNames,
+  linkMemoryAliases,
+  unlinkMemoryAlias,
+  listMemoryAliasGroups,
   type Note,
   type Folder,
+  type MemoryAliasScope,
 } from '../lib/db';
 
 // Track resources created during tests so we can clean them up and avoid
@@ -22,6 +30,7 @@ import {
 // ("源清") and 2 notes ("自我介绍", "产品介绍").
 const createdNoteIds: string[] = [];
 const createdFolderIds: string[] = [];
+const createdAliases: { scope: MemoryAliasScope; name: string }[] = [];
 
 afterEach(() => {
   for (const id of createdNoteIds.splice(0)) {
@@ -30,7 +39,16 @@ afterEach(() => {
   for (const id of createdFolderIds.splice(0)) {
     deleteFolder(id);
   }
+  for (const a of createdAliases.splice(0)) {
+    unlinkMemoryAlias(a.scope, a.name);
+  }
 });
+
+function trackAliasNames(scope: MemoryAliasScope, names: string[]) {
+  for (const name of names) {
+    createdAliases.push({ scope, name });
+  }
+}
 
 function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -261,5 +279,151 @@ describe('seed idempotency', () => {
     expect(all.length).toBe(2);
     const titles = all.map((n) => n.title).sort();
     expect(titles).toEqual(['产品介绍', '自我介绍']);
+  });
+});
+
+describe('memory aliases', () => {
+  it('resolveMemoryAliasNames returns [name] when no alias exists', () => {
+    const name = `solo-${randomId()}`;
+    expect(resolveMemoryAliasNames('project', name)).toEqual([name]);
+  });
+
+  it('linkMemoryAliases groups names; resolve returns all peers', () => {
+    const a = `proj-a-${randomId()}`;
+    const b = `proj-b-${randomId()}`;
+    const linked = linkMemoryAliases('project', [a, b]);
+    expect('action' in linked).toBe(true);
+    if ('action' in linked) {
+      trackAliasNames('project', linked.group.names);
+      expect(linked.group.names.sort()).toEqual([a, b].sort());
+    }
+    expect(resolveMemoryAliasNames('project', a).sort()).toEqual([a, b].sort());
+    expect(resolveMemoryAliasNames('project', b).sort()).toEqual([a, b].sort());
+
+    const groups = listMemoryAliasGroups('project');
+    expect(
+      groups.some(
+        (g) => g.names.includes(a) && g.names.includes(b)
+      )
+    ).toBe(true);
+  });
+
+  it('recallMemory returns union of aliased project folders', () => {
+    const suffix = randomId();
+    const nameA = `项目管理-项目A-${suffix}`;
+    const nameB = `代码开发-项目A-${suffix}`;
+    const titleA = `MemA ${suffix}`;
+    const titleB = `MemB ${suffix}`;
+
+    const savedA = upsertMemory({
+      scope: 'project',
+      project: nameA,
+      title: titleA,
+      content: `content A ${suffix}`,
+      source_app: 'cursor',
+    });
+    expect('action' in savedA).toBe(true);
+    if ('action' in savedA) {
+      createdNoteIds.push(savedA.note.id);
+    }
+
+    const savedB = upsertMemory({
+      scope: 'project',
+      project: nameB,
+      title: titleB,
+      content: `content B ${suffix}`,
+      source_app: 'cursor',
+    });
+    expect('action' in savedB).toBe(true);
+    if ('action' in savedB) {
+      createdNoteIds.push(savedB.note.id);
+    }
+
+    const root = getFolderByParentAndName(null, '项目记忆');
+    if (root) {
+      createdFolderIds.push(root.id);
+      const fa = getFolderByParentAndName(root.id, nameA);
+      const fb = getFolderByParentAndName(root.id, nameB);
+      if (fa) createdFolderIds.push(fa.id);
+      if (fb) createdFolderIds.push(fb.id);
+    }
+
+    // Without aliases: each name only sees its own memory.
+    const alone = recallMemory({ project: nameA });
+    expect(alone.project.some((n) => n.title === titleA)).toBe(true);
+    expect(alone.project.some((n) => n.title === titleB)).toBe(false);
+
+    const linked = linkMemoryAliases('project', [nameA, nameB]);
+    expect('action' in linked).toBe(true);
+    if ('action' in linked) trackAliasNames('project', linked.group.names);
+
+    const viaA = recallMemory({ project: nameA });
+    expect(viaA.project.some((n) => n.title === titleA)).toBe(true);
+    expect(viaA.project.some((n) => n.title === titleB)).toBe(true);
+
+    const viaB = recallMemory({ project: nameB });
+    expect(viaB.project.some((n) => n.title === titleA)).toBe(true);
+    expect(viaB.project.some((n) => n.title === titleB)).toBe(true);
+  });
+
+  it('renaming project folder migrates mem_project; old name no longer matches', () => {
+    const suffix = randomId();
+    const oldName = `old-proj-${suffix}`;
+    const newName = `new-proj-${suffix}`;
+    const title = `RenameMem ${suffix}`;
+
+    const saved = upsertMemory({
+      scope: 'project',
+      project: oldName,
+      title,
+      content: `rename body ${suffix}`,
+      source_app: 'cursor',
+    });
+    expect('action' in saved).toBe(true);
+    if (!('action' in saved)) return;
+    createdNoteIds.push(saved.note.id);
+    expect(saved.note.mem_project).toBe(oldName);
+
+    const root = getFolderByParentAndName(null, '项目记忆');
+    expect(root).not.toBeNull();
+    if (!root) return;
+    createdFolderIds.push(root.id);
+    const projectFolder = getFolderByParentAndName(root.id, oldName);
+    expect(projectFolder).not.toBeNull();
+    if (!projectFolder) return;
+    createdFolderIds.push(projectFolder.id);
+
+    // Also put old name in an alias group with a peer, to verify rename updates alias table.
+    const peer = `peer-${suffix}`;
+    const linked = linkMemoryAliases('project', [oldName, peer]);
+    expect('action' in linked).toBe(true);
+    if ('action' in linked) {
+      trackAliasNames('project', [newName, peer]);
+    }
+
+    const updated = updateFolder(projectFolder.id, { name: newName });
+    expect(updated).not.toBeNull();
+    expect(updated!.name).toBe(newName);
+
+    const note = getNote(saved.note.id);
+    expect(note).not.toBeNull();
+    expect(note!.mem_project).toBe(newName);
+
+    const recallOld = recallMemory({ project: oldName });
+    expect(recallOld.project.some((n) => n.id === saved.note.id)).toBe(false);
+
+    const recallNew = recallMemory({ project: newName });
+    expect(recallNew.project.some((n) => n.id === saved.note.id)).toBe(true);
+
+    // Alias table: old name gone, new name peers with peer.
+    expect(resolveMemoryAliasNames('project', newName).sort()).toEqual(
+      [newName, peer].sort()
+    );
+    expect(resolveMemoryAliasNames('project', oldName)).toEqual([oldName]);
+  });
+
+  it('linkMemoryAliases rejects fewer than two names', () => {
+    const result = linkMemoryAliases('project', [`only-${randomId()}`]);
+    expect('error' in result).toBe(true);
   });
 });
